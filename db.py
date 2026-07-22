@@ -28,16 +28,22 @@ def setup_iniziale_db():
         if not mercato_doc.exists:
             mercato_ref.set({
                 "prezzi_attuali": {"ENI": 0.0, "LEONARDO": 0.0, "FERRAGAMO": 0.0},
-                "dividendi_annui": {"ENI": 0.0, "LEONARDO": 0.63, "FERRAGAMO": 0.0}
+                "dividendi_annui": {"ENI": 1.10, "LEONARDO": 0.63, "FERRAGAMO": 0.0}
             })
         else:
-            # Assicura che Leonardo abbia il dividendo corretto a 0.63 se diverso o mancante
+            # Assicura che i dividendi unitari siano corretti nel database
             mercato_dati = mercato_doc.to_dict() or {}
             dividendi = mercato_dati.get("dividendi_annui", {})
+            aggiornato = False
+            if dividendi.get("ENI", 0.0) != 1.10:
+                dividendi["ENI"] = 1.10
+                aggiornato = True
             if dividendi.get("LEONARDO", 0.0) != 0.63:
                 dividendi["LEONARDO"] = 0.63
+                aggiornato = True
+            if aggiornato:
                 mercato_ref.update({"dividendi_annui": dividendi})
-                logger.info("✅ Dividendo Leonardo aggiornato a 0.63 € nel database")
+                logger.info("✅ Dividendi unitari aggiornati nel database")
 
         if db.collection("utenti").document("enzo").get().exists:
             logger.info("Database utenti già inizializzato")
@@ -67,7 +73,6 @@ def setup_iniziale_db():
         }, merge=True)
         logger.info(f"✅ Utente creato: {user_id} ({info['nome_portafoglio']})")
 
-# Esecuzione singola al caricamento del modulo
 try:
     setup_iniziale_db()
 except Exception as e:
@@ -75,41 +80,24 @@ except Exception as e:
 
 # --- AUTENTICAZIONE ---
 def verifica_credenziali(user_input, psw_input):
-    """
-    Verifica le credenziali dell'utente con bcrypt
-    Ritorna: (successo: bool, dati_utente: dict)
-    """
     try:
         doc = db.collection("utenti").document(user_input).get()
-        
         if not doc.exists:
-            logger.warning(f"❌ Login fallito: utente '{user_input}' non trovato")
             return False, {}
-        
         dati_utente = doc.to_dict()
         hash_salvato = dati_utente.get("password_hash", "").encode('utf-8')
         psw_bytes = psw_input.encode('utf-8')
-        
         if bcrypt.checkpw(psw_bytes, hash_salvato):
-            logger.info(f"✅ Login riuscito: {user_input}")
             return True, dati_utente
         else:
-            logger.warning(f"❌ Login fallito: password errata per '{user_input}'")
             return False, {}
-    
     except Exception as e:
         logger.error(f"Errore verifica credenziali: {e}")
         return False, {}
 
 # --- CARICAMENTO DATI CON AUTORIZZAZIONE ---
 def carica_dati_autorizzati(utente, ruolo):
-    """
-    Carica i dati con autorizzazione basata su ruolo
-    - Admin: vede TUTTO (tutti i portafogli + prezzi + dividendi)
-    - User: vede SOLO il suo portafoglio + prezzi comuni
-    """
     dati = {"portafoglio": {}, "prezzi_attuali": {}, "dividendi_annui": {}}
-    
     try:
         doc_mercato = db.collection("mercato").document("prezzi_e_dividendi").get()
         if doc_mercato.exists:
@@ -131,10 +119,7 @@ def carica_dati_autorizzati(utente, ruolo):
                 nome_port = u_data.get("nome_portafoglio")
                 if nome_port:
                     dati["portafoglio"][nome_port] = u_data.get("portafoglio", [])
-        
-        logger.info(f"✅ Dati caricati per {utente} (ruolo: {ruolo})")
         return dati
-    
     except Exception as e:
         logger.error(f"Errore carica dati: {e}")
         return dati
@@ -163,8 +148,6 @@ def _transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titol
     
     transaction.update(user_ref, {"portafoglio": portafoglio})
     transaction.set(mercato_ref, mercato_dati, merge=True)
-    
-    logger.info(f"✅ Transazione acquisto: {titolo} x{nuovo_lotto['quantita']}")
     return True
 
 @firestore.transactional
@@ -174,42 +157,24 @@ def _transazione_vendita(transaction, user_ref, indice):
     portafoglio = user_dati.get("portafoglio", [])
     
     if 0 <= indice < len(portafoglio):
-        titolo_venduto = portafoglio[indice]["titolo"]
         portafoglio.pop(indice)
         transaction.update(user_ref, {"portafoglio": portafoglio})
-        logger.info(f"✅ Transazione vendita: {titolo_venduto}")
         return True
-    
-    logger.warning(f"❌ Vendita fallita: indice {indice} non valido")
     return False
 
-# --- OPERAZIONI PUBBLICHE ---
 def registra_acquisto(user_id, nuovo_lotto, titolo, prezzo):
-    try:
-        user_ref = db.collection("utenti").document(user_id)
-        mercato_ref = db.collection("mercato").document("prezzi_e_dividendi")
-        transaction = db.transaction()
-        _transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titolo, prezzo)
-    except Exception as e:
-        logger.error(f"❌ Errore registrazione acquisto: {e}")
-        raise
+    user_ref = db.collection("utenti").document(user_id)
+    mercato_ref = db.collection("mercato").document("prezzi_e_dividendi")
+    transaction = db.transaction()
+    _transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titolo, prezzo)
 
 def registra_vendita(user_id, indice):
-    try:
-        user_ref = db.collection("utenti").document(user_id)
-        transaction = db.transaction()
-        return _transazione_vendita(transaction, user_ref, indice)
-    except Exception as e:
-        logger.error(f"❌ Errore registrazione vendita: {e}")
-        raise
+    user_ref = db.collection("utenti").document(user_id)
+    transaction = db.transaction()
+    return _transazione_vendita(transaction, user_ref, indice)
 
 def salva_mercato(prezzi, dividendi):
-    try:
-        db.collection("mercato").document("prezzi_e_dividendi").set({
-            "prezzi_attuali": prezzi,
-            "dividendi_annui": dividendi
-        }, merge=True)
-        logger.info(f"✅ Mercato aggiornato: {len(prezzi)} titoli")
-    except Exception as e:
-        logger.error(f"❌ Errore salvataggio mercato: {e}")
-        raise
+    db.collection("mercato").document("prezzi_e_dividendi").set({
+        "prezzi_attuali": prezzi,
+        "dividendi_annui": dividendi
+    }, merge=True)
