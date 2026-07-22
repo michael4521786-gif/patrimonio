@@ -152,16 +152,16 @@ st.sidebar.title(f"Ciao {st.session_state['nome_portafoglio']}")
 iniziale = st.session_state['nome_portafoglio'][0].upper()
 st.sidebar.markdown(f"""
     <div style="
-        width: 90px;
-        height: 100px;
+        width: 90px; 
+        height: 100px; 
         border-radius: 12px 12px 45px 45px;
         background: linear-gradient(135deg, #7A0016 0%, #3B0008 100%);
         border: 4px solid #D4AF37;
         color: #FDF5E6;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 55px;
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        font-size: 55px; 
         font-family: 'Times New Roman', Times, serif;
         font-weight: bold;
         margin-bottom: 20px;
