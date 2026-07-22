@@ -9,6 +9,7 @@ import bcrypt
 import logging
 import db
 import time
+import datetime
 
 # --- CONFIGURAZIONE LOGGING ---
 logger = logging.getLogger(__name__)
@@ -118,6 +119,27 @@ def format_ita(valore, decimali=2):
     str_val = f"{int(valore):,}" if decimali == 0 else f"{float(valore):,.{decimali}f}"
     return str_val.replace(',', 'X').replace('.', ',').replace('X', '.')
 
+def get_lotto_data(membro, indice, lotto):
+    """Restituisce la data d'acquisto formattata senza zeri iniziali (es. 1/8/2025)"""
+    if "data" in lotto and lotto["data"]:
+        return lotto["data"]
+    
+    m = membro.lower()
+    titolo = lotto.get("titolo", "").upper().strip()
+    
+    if m == "enzo":
+        if titolo == "ENI": return "1/8/2025"
+        if titolo == "LEONARDO": return "7/8/2025"
+        if titolo == "FERRAGAMO": return "15/5/2026"
+    elif m == "stefania":
+        if indice == 1: return "10/7/2026"
+        return "1/8/2025"
+    elif m == "claudia":
+        if indice == 1: return "6/7/2026"
+        return "1/8/2025"
+    
+    return "1/8/2025"
+
 def scarica_prezzo_yahoo_diretto(ticker):
     session = requests.Session()
     session.headers.update({
@@ -203,12 +225,20 @@ if st.session_state["ruolo"] == "admin":
         titolo_acquisto = st.text_input("Nome Titolo o Ticker (es. ENI, AAPL)").upper().strip()
         qta_acquisto = st.number_input("Quantità", min_value=1, value=100, step=1)
         prezzo_acquisto = st.number_input("Prezzo di carico (€)", min_value=0.001, value=10.00, step=0.01, format="%.3f")
+        data_acquisto = st.date_input("Data Acquisto", value=datetime.date.today())
         submit_acquisto = st.form_submit_button("Conferma Acquisto")
         
         if submit_acquisto and titolo_acquisto:
             user_id = ID_UTENTI.get(membro_acquisto)
             if user_id:
-                nuovo_lotto = {"titolo": titolo_acquisto, "quantita": qta_acquisto, "prezzo_carico": prezzo_acquisto}
+                # Formatta la data senza zeri iniziali (es. 1/8/2025)
+                data_str = f"{data_acquisto.day}/{data_acquisto.month}/{data_acquisto.year}"
+                nuovo_lotto = {
+                    "titolo": titolo_acquisto, 
+                    "quantita": qta_acquisto, 
+                    "prezzo_carico": prezzo_acquisto,
+                    "data": data_str
+                }
                 try:
                     db.registra_acquisto(user_id, nuovo_lotto, titolo_acquisto, prezzo_acquisto)
                     st.success("Acquisto registrato! ✅")
@@ -327,12 +357,16 @@ for i, membro in enumerate(membri_da_mostrare):
         righe = []
         tot_azioni = tot_membro_inv = tot_membro_att = tot_plus_netta = tot_div_annuo = tot_div_trimestrale = 0
         
-        for lotto in lotti:
+        for idx, lotto in enumerate(lotti):
             titolo = lotto["titolo"].upper().strip()
             q = lotto["quantita"]
             pc = lotto["prezzo_carico"]
             pa = dati["prezzi_attuali"].get(titolo, lotto["prezzo_carico"])
             div_unitario = dati["dividendi_annui"].get(titolo, 0.0)
+            
+            # Recupera la data formattata (es. 1/8/2025)
+            data_lotto = get_lotto_data(membro, idx, lotto)
+            prezzo_e_data = f"{format_ita(pc, 3)}\n({data_lotto})"
             
             inv = q * pc
             att = q * pa
@@ -357,14 +391,14 @@ for i, membro in enumerate(membri_da_mostrare):
                 "Logo": LOGHI_AZIENDE.get(titolo, ""),
                 "Titolo": titolo.capitalize(), 
                 "Azioni": format_ita(q, 0), 
-                "Prezzo Carico (€)": format_ita(pc, 3),
+                "Prezzo Carico (€)": prezzo_e_data,
                 "Prezzo Mercato (€)": format_ita(pa, 2), 
                 "Investito (€)": format_ita(inv, 2),
                 "Valore Attuale (€)": format_ita(att, 2), 
                 "Plus/Minus Netta (€)": f"{segno}{format_ita(plus_netta, 2)}",
-                "Div. Az. (€)": str_div_unitario,          # <--- INTESTAZIONE ACCORCIATA
+                "Div. Az. (€)": str_div_unitario,
                 "Div. Annuo Netto": f"{format_ita(div_annuo_netto, 2)} €", 
-                "Div. Trim. Netto": str_trimestrale       # <--- INTESTAZIONE ACCORCIATA
+                "Div. Trim. Netto": str_trimestrale
             })
         
         segno_tot = "+" if tot_plus_netta > 0 else ""
