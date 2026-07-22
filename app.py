@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import yfinance as yf
+import requests
 import firebase_admin
 from firebase_admin import credentials, firestore
 import os
@@ -104,7 +104,8 @@ def carica_dati_autorizzati_cached(utente, ruolo):
 dati = carica_dati_autorizzati_cached(st.session_state["utente"], st.session_state["ruolo"])
 
 # --- FUNZIONI DI SUPPORTO ---
-def get_ticker_yahoo(nome_titolo):
+def get_ticker_alpha(nome_titolo):
+    # Alpha Vantage supporta il suffisso .MI per la Borsa Italiana (Milano)
     mappa_fissa = {"ENI": "ENI.MI", "LEONARDO": "LDO.MI", "FERRAGAMO": "SFER.MI"}
     return mappa_fissa.get(nome_titolo, f"{nome_titolo}.MI" if "." not in nome_titolo else nome_titolo)
 
@@ -112,41 +113,30 @@ def format_ita(valore, decimali=2):
     str_val = f"{int(valore):,}" if decimali == 0 else f"{float(valore):,.{decimali}f}"
     return str_val.replace(',', 'X').replace('.', ',').replace('X', '.')
 
-def scarica_prezzo_yahoo(ticker, max_tentativi=3):
+def scarica_prezzo_alpha_vantage(ticker):
     """
-    Scarica il prezzo da Yahoo Finance con retry e user-agent
+    Scarica il prezzo in tempo reale usando l'endpoint GLOBAL_QUOTE di Alpha Vantage
     """
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
+    api_key = st.secrets.get("alphavantage", {}).get("key", "demo")
+    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={api_key}"
     
-    for tentativo in range(max_tentativi):
-        try:
-            stock = yf.Ticker(ticker)
-            # Prova con diversi periodi
-            for periodo in ["1d", "5d", "1mo"]:
-                dati_storici = stock.history(period=periodo)
-                
-                if not dati_storici.empty and 'Close' in dati_storici.columns:
-                    close_data = dati_storici['Close']
-                    serie_valida = close_data.dropna()
-                    
-                    if not serie_valida.empty:
-                        prezzo = float(serie_valida.iloc[-1])
-                        if prezzo > 0:  # Validazione prezzo > 0
-                            logger.info(f"✅ Prezzo {ticker}: €{prezzo:.2f} (periodo: {periodo}, tentativo {tentativo+1})")
-                            return round(prezzo, 2)
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            # Alpha Vantage restituisce un dizionario con chiave 'Global Quote'
+            quote = data.get("Global Quote", {})
+            prezzo_str = quote.get("05. price")
             
-            # Attesa prima del retry
-            if tentativo < max_tentativi - 1:
-                time.sleep(1)
-                
-        except Exception as e:
-            logger.warning(f"Tentativo {tentativo+1} fallito per {ticker}: {str(e)}")
-            if tentativo < max_tentativi - 1:
-                time.sleep(1)
-    
-    logger.error(f"❌ Impossibile scaricare prezzo per {ticker} dopo {max_tentativi} tentativi")
+            if prezzo_str:
+                prezzo = float(prezzo_str)
+                if prezzo > 0:
+                    return round(prezzo, 2)
+                    
+        logger.warning( ف"Impossibile leggere il prezzo per {ticker} da Alpha Vantage. Risposta: {data if 'data' in locals() else 'Errore HTTP'}")
+    except Exception as e:
+        logger.error(f"Errore di connessione ad Alpha Vantage per {ticker}: {e}")
+        
     return None
 
 # --- SIDEBAR CON SCUDO ARALDICO ---
@@ -182,18 +172,16 @@ st.sidebar.divider()
 if st.session_state["ruolo"] == "admin":
     st.sidebar.subheader("🌐 Sincronizzazione Borsa")
     if st.sidebar.button("📥 Scarica Prezzi in Tempo Reale"):
-        with st.spinner("⏳ Scaricamento prezzi da Yahoo Finance (può impiegare 30 sec)..."):
+        with st.spinner("⏳ Scaricamento prezzi da Alpha Vantage..."):
             prezzi_aggiornati = {}
             titoli_aggiornati = []
             errori = []
             
-            st.sidebar.info("🔄 Tentando download...")
-            
             for nome_titolo in TITOLI_VALIDI:
-                ticker = get_ticker_yahoo(nome_titolo)
-                logger.info(f"Scaricamento {nome_titolo} ({ticker})...")
+                ticker = get_ticker_alpha(nome_titolo)
+                logger.info(f"Scaricamento {nome_titolo} ({ticker}) via Alpha Vantage...")
                 
-                prezzo = scarica_prezzo_yahoo(ticker)
+                prezzo = scarica_prezzo_alpha_vantage(ticker)
                 
                 if prezzo is not None and prezzo > 0:
                     prezzi_aggiornati[nome_titolo] = prezzo
@@ -202,6 +190,9 @@ if st.session_state["ruolo"] == "admin":
                 else:
                     errori.append(nome_titolo)
                     st.sidebar.warning(f"⚠️ {nome_titolo}: prezzo non disponibile")
+                
+                # Alpha Vantage (piano gratuito) ha un limite di 5 chiamate al minuto, un piccolo sleep protegge dal blocco
+                time.sleep(1)
             
             # Aggiorna il database
             if titoli_aggiornati:
@@ -211,8 +202,8 @@ if st.session_state["ruolo"] == "admin":
                 st.cache_data.clear()
                 st.rerun()
             else:
-                st.sidebar.error("❌ Impossibile scaricare prezzi. Possibili cause:\n- Yahoo Finance offline\n- Rate limit raggiunto\n- Problema connessione\n\nRiprova tra 5 minuti.")
-                logger.error(f"Nessun prezzo scaricato. Errori: {errori}")
+                st.sidebar.error("❌ Impossibile scaricare i prezzi. Verifica di aver inserito correttamente l'API key di Alpha Vantage nei secrets.")
+                logger.error(f"Nessun prezzo scaricato da Alpha Vantage. Errori: {errori}")
 
     st.sidebar.divider()
     st.sidebar.subheader("🛒 Registra Acquisto")
@@ -384,7 +375,7 @@ for i, membro in enumerate(membri_da_mostrare):
                 "Logo": LOGHI_AZIENDE.get(titolo.upper().strip(), ""),
                 "Titolo": titolo, "Azioni": format_ita(q, 0), "Prezzo Carico (€)": format_ita(pc, 3),
                 "Prezzo Mercato (€)": format_ita(pa, 2), "Investito (€)": format_ita(inv, 2),
-                "Valore Attuale (€)": format_ita(att, 2), "Plus/Minus Netta (€)": f"{segno}{format_ita(plus_netta, 2)}",
+                "Valore Attuale (€)": format_ita(att, 2), "Plus/Minus Netta (€)": f"{segno}{format_ita(plusvalenza_netta, 2)}",
                 "Div. Annuo Netto": f"{format_ita(div_annuo_netto, 2)} €", "Div. Trimestrale Netto": str_trimestrale
             })
         
