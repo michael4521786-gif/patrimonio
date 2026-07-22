@@ -105,7 +105,6 @@ dati = carica_dati_autorizzati_cached(st.session_state["utente"], st.session_sta
 
 # --- FUNZIONI DI SUPPORTO ---
 def get_ticker_alpha(nome_titolo):
-    # Alpha Vantage supporta il suffisso .MI per la Borsa Italiana (Milano)
     mappa_fissa = {"ENI": "ENI.MI", "LEONARDO": "LDO.MI", "FERRAGAMO": "SFER.MI"}
     return mappa_fissa.get(nome_titolo, f"{nome_titolo}.MI" if "." not in nome_titolo else nome_titolo)
 
@@ -114,9 +113,6 @@ def format_ita(valore, decimali=2):
     return str_val.replace(',', 'X').replace('.', ',').replace('X', '.')
 
 def scarica_prezzo_alpha_vantage(ticker):
-    """
-    Scarica il prezzo in tempo reale usando l'endpoint GLOBAL_QUOTE di Alpha Vantage
-    """
     api_key = st.secrets.get("alphavantage", {}).get("key", "demo")
     url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={api_key}"
     
@@ -124,7 +120,6 @@ def scarica_prezzo_alpha_vantage(ticker):
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
-            # Alpha Vantage restituisce un dizionario con chiave 'Global Quote'
             quote = data.get("Global Quote", {})
             prezzo_str = quote.get("05. price")
             
@@ -133,7 +128,7 @@ def scarica_prezzo_alpha_vantage(ticker):
                 if prezzo > 0:
                     return round(prezzo, 2)
                     
-        logger.warning( ف"Impossibile leggere il prezzo per {ticker} da Alpha Vantage. Risposta: {data if 'data' in locals() else 'Errore HTTP'}")
+        logger.warning(f"Impossibile leggere il prezzo per {ticker} da Alpha Vantage.")
     except Exception as e:
         logger.error(f"Errore di connessione ad Alpha Vantage per {ticker}: {e}")
         
@@ -191,10 +186,8 @@ if st.session_state["ruolo"] == "admin":
                     errori.append(nome_titolo)
                     st.sidebar.warning(f"⚠️ {nome_titolo}: prezzo non disponibile")
                 
-                # Alpha Vantage (piano gratuito) ha un limite di 5 chiamate al minuto, un piccolo sleep protegge dal blocco
                 time.sleep(1)
             
-            # Aggiorna il database
             if titoli_aggiornati:
                 dati["prezzi_attuali"].update(prezzi_aggiornati)
                 db.salva_mercato(dati["prezzi_attuali"], dati["dividendi_annui"])
@@ -202,8 +195,7 @@ if st.session_state["ruolo"] == "admin":
                 st.cache_data.clear()
                 st.rerun()
             else:
-                st.sidebar.error("❌ Impossibile scaricare i prezzi. Verifica di aver inserito correttamente l'API key di Alpha Vantage nei secrets.")
-                logger.error(f"Nessun prezzo scaricato da Alpha Vantage. Errori: {errori}")
+                st.sidebar.error("❌ Impossibile scaricare i prezzi. Verifica l'API key di Alpha Vantage nei secrets.")
 
     st.sidebar.divider()
     st.sidebar.subheader("🛒 Registra Acquisto")
@@ -375,7 +367,7 @@ for i, membro in enumerate(membri_da_mostrare):
                 "Logo": LOGHI_AZIENDE.get(titolo.upper().strip(), ""),
                 "Titolo": titolo, "Azioni": format_ita(q, 0), "Prezzo Carico (€)": format_ita(pc, 3),
                 "Prezzo Mercato (€)": format_ita(pa, 2), "Investito (€)": format_ita(inv, 2),
-                "Valore Attuale (€)": format_ita(att, 2), "Plus/Minus Netta (€)": f"{segno}{format_ita(plusvalenza_netta, 2)}",
+                "Valore Attuale (€)": format_ita(att, 2), "Plus/Minus Netta (€)": f"{segno}{format_ita(plus_netta, 2)}",
                 "Div. Annuo Netto": f"{format_ita(div_annuo_netto, 2)} €", "Div. Trimestrale Netto": str_trimestrale
             })
         
