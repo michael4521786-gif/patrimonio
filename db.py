@@ -22,21 +22,31 @@ db = init_firebase()
 def setup_iniziale_db():
     """Migrazione e setup automatico al primo avvio"""
     try:
+        mercato_ref = db.collection("mercato").document("prezzi_e_dividendi")
+        mercato_doc = mercato_ref.get()
+        
+        if not mercato_doc.exists:
+            mercato_ref.set({
+                "prezzi_attuali": {"ENI": 0.0, "LEONARDO": 0.0, "FERRAGAMO": 0.0},
+                "dividendi_annui": {"ENI": 0.0, "LEONARDO": 0.68, "FERRAGAMO": 0.0}
+            })
+        else:
+            # Assicura che Leonardo abbia il dividendo corretto a 0.68 se è a 0 o mancante
+            mercato_dati = mercato_doc.to_dict() or {}
+            dividendi = mercato_dati.get("dividendi_annui", {})
+            if dividendi.get("LEONARDO", 0.0) != 0.68:
+                dividendi["LEONARDO"] = 0.68
+                mercato_ref.update({"dividendi_annui": dividendi})
+                logger.info("✅ Dividendo Leonardo aggiornato a 0.68 € nel database")
+
         if db.collection("utenti").document("enzo").get().exists:
-            logger.info("Database già inizializzato")
+            logger.info("Database utenti già inizializzato")
             return
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Errore controllo db mercato: {e}")
     
-    logger.info("Inizializzazione database...")
+    logger.info("Inizializzazione database utenti...")
     
-    # Crea collection mercato con prezzi iniziali
-    db.collection("mercato").document("prezzi_e_dividendi").set({
-        "prezzi_attuali": {"ENI": 0.0, "LEONARDO": 0.0, "FERRAGAMO": 0.0},
-        "dividendi_annui": {"ENI": 0.0, "LEONARDO": 0.0, "FERRAGAMO": 0.0}
-    })
-    
-    # Setup utenti con password hashate
     mappa_setup = {
         "enzo": {"ruolo": "admin", "nome_portafoglio": "Enzo"},
         "stefania": {"ruolo": "user", "nome_portafoglio": "Stefania"},
@@ -54,7 +64,7 @@ def setup_iniziale_db():
             "ruolo": info["ruolo"],
             "nome_portafoglio": info["nome_portafoglio"],
             "portafoglio": []
-        })
+        }, merge=True)
         logger.info(f"✅ Utente creato: {user_id} ({info['nome_portafoglio']})")
 
 # Esecuzione singola al caricamento del modulo
@@ -101,16 +111,13 @@ def carica_dati_autorizzati(utente, ruolo):
     dati = {"portafoglio": {}, "prezzi_attuali": {}, "dividendi_annui": {}}
     
     try:
-        # Carica prezzi e dividendi (accessibili a tutti)
         doc_mercato = db.collection("mercato").document("prezzi_e_dividendi").get()
         if doc_mercato.exists:
             mercato = doc_mercato.to_dict()
             dati["prezzi_attuali"] = mercato.get("prezzi_attuali", {})
             dati["dividendi_annui"] = mercato.get("dividendi_annui", {})
         
-        # Carica portafoglio in base al ruolo
         if ruolo == "admin":
-            # Admin vede TUTTI i portafogli
             utenti_docs = db.collection("utenti").stream()
             for u in utenti_docs:
                 u_data = u.to_dict()
@@ -118,7 +125,6 @@ def carica_dati_autorizzati(utente, ruolo):
                 if nome_port:
                     dati["portafoglio"][nome_port] = u_data.get("portafoglio", [])
         else:
-            # User vede solo il SUO portafoglio
             doc_utente = db.collection("utenti").document(utente).get()
             if doc_utente.exists:
                 u_data = doc_utente.to_dict()
@@ -136,10 +142,6 @@ def carica_dati_autorizzati(utente, ruolo):
 # --- TRANSAZIONI ATOMIC (ACID) ---
 @firestore.transactional
 def _transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titolo, prezzo):
-    """
-    Transazione ATOMIC per l'acquisto di un titolo
-    Garantisce ACID: Atomicity, Consistency, Isolation, Durability
-    """
     user_snap = user_ref.get(transaction=transaction)
     mercato_snap = mercato_ref.get(transaction=transaction)
     
@@ -147,21 +149,18 @@ def _transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titol
     portafoglio = user_dati.get("portafoglio", [])
     mercato_dati = mercato_snap.to_dict() if mercato_snap.exists else {"prezzi_attuali": {}, "dividendi_annui": {}}
     
-    # Aggiungi il nuovo lotto
     portafoglio.append(nuovo_lotto)
     
-    # Inizializza strutture se necessario
     if "prezzi_attuali" not in mercato_dati:
         mercato_dati["prezzi_attuali"] = {}
     if "dividendi_annui" not in mercato_dati:
         mercato_dati["dividendi_annui"] = {}
     
-    # Aggiungi il titolo al mercato se non esiste
     if titolo not in mercato_dati["prezzi_attuali"]:
         mercato_dati["prezzi_attuali"][titolo] = prezzo
+    if titolo not in mercato_dati["dividendi_annui"]:
         mercato_dati["dividendi_annui"][titolo] = 0.0
     
-    # ATOMIC: aggiorna CONTEMPORANEAMENTE (tutto o niente)
     transaction.update(user_ref, {"portafoglio": portafoglio})
     transaction.set(mercato_ref, mercato_dati, merge=True)
     
@@ -170,9 +169,6 @@ def _transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titol
 
 @firestore.transactional
 def _transazione_vendita(transaction, user_ref, indice):
-    """
-    Transazione ATOMIC per la vendita (rimozione) di un titolo
-    """
     user_snap = user_ref.get(transaction=transaction)
     user_dati = user_snap.to_dict() or {}
     portafoglio = user_dati.get("portafoglio", [])
@@ -189,7 +185,6 @@ def _transazione_vendita(transaction, user_ref, indice):
 
 # --- OPERAZIONI PUBBLICHE ---
 def registra_acquisto(user_id, nuovo_lotto, titolo, prezzo):
-    """Registra un acquisto in modo ATOMIC"""
     try:
         user_ref = db.collection("utenti").document(user_id)
         mercato_ref = db.collection("mercato").document("prezzi_e_dividendi")
@@ -200,7 +195,6 @@ def registra_acquisto(user_id, nuovo_lotto, titolo, prezzo):
         raise
 
 def registra_vendita(user_id, indice):
-    """Registra una vendita in modo ATOMIC"""
     try:
         user_ref = db.collection("utenti").document(user_id)
         transaction = db.transaction()
@@ -210,12 +204,11 @@ def registra_vendita(user_id, indice):
         raise
 
 def salva_mercato(prezzi, dividendi):
-    """Salva i prezzi e dividendi attuali nel database"""
     try:
         db.collection("mercato").document("prezzi_e_dividendi").set({
             "prezzi_attuali": prezzi,
             "dividendi_annui": dividendi
-        })
+        }, merge=True)
         logger.info(f"✅ Mercato aggiornato: {len(prezzi)} titoli")
     except Exception as e:
         logger.error(f"❌ Errore salvataggio mercato: {e}")
