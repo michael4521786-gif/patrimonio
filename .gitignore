@@ -1,0 +1,16 @@
+# Segreti e Credenziali (CRUCIALE)
+.streamlit/secrets.toml
+.env
+
+# Cache di Python e file di sistema
+__pycache__/
+*.pyc
+.DS_Store
+
+# Ambienti virtuali
+venv/
+env/
+
+# File multimediali pesanti o privati
+*.jpg
+*.png
