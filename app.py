@@ -6,6 +6,11 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import os
 import bcrypt
+import logging
+
+# --- CONFIGURAZIONE LOGGING ---
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # --- CONFIGURAZIONE PAGINA E INIEZIONE CSS ADATTIVO (CHIARO/SCURO) ---
 st.set_page_config(page_title="Wealth Management", page_icon="🏦", layout="wide")
@@ -40,6 +45,7 @@ LOGHI_AZIENDE = {
     "LEONARDO": "https://www.google.com/s2/favicons?domain=leonardo.com&sz=128#.png",
     "FERRAGAMO": "https://www.google.com/s2/favicons?domain=ferragamo.com&sz=128#.png"
 }
+TITOLI_VALIDI = ["ENI", "LEONARDO", "FERRAGAMO"]
 
 # Gestione dinamica delle aliquote fiscali dai secrets (default 26%)
 ALIQUOTE_TASSE = {
@@ -154,7 +160,11 @@ def carica_dati_autorizzati(utente, ruolo):
             
     return dati
 
-dati = carica_dati_autorizzati(st.session_state["utente"], st.session_state["ruolo"])
+@st.cache_data(ttl=300)
+def carica_dati_autorizzati_cached(utente, ruolo):
+    return carica_dati_autorizzati(utente, ruolo)
+
+dati = carica_dati_autorizzati_cached(st.session_state["utente"], st.session_state["ruolo"])
 
 # --- LOGICA TRANSAZIONALE ATOMIC (ACID) ---
 @firestore.transactional
@@ -249,17 +259,19 @@ if st.session_state["ruolo"] == "admin":
                     dati_storici = stock.history(period="1d")
                     if not dati_storici.empty:
                         dati["prezzi_attuali"][nome_titolo] = round(float(dati_storici['Close'].iloc[-1]), 2)
-                except Exception:
+                except Exception as e:
+                    logger.error(f"Errore sincronizzazione per {nome_titolo}: {e}")
                     st.sidebar.warning(f"Impossibile trovare il prezzo per {nome_titolo}")
             salva_mercato(dati["prezzi_attuali"], dati["dividendi_annui"])
             st.sidebar.success("Prezzi sincronizzati con successo!")
+            st.cache_data.clear()
             st.rerun()
 
     st.sidebar.divider()
     st.sidebar.subheader("🛒 Registra Acquisto")
     with st.sidebar.form("form_acquisto"):
         membro_acquisto = st.selectbox("Chi acquista?", ORDINE_FAMIGLIA)
-        titolo_acquisto = st.text_input("Nome Titolo (es. ENI)").upper().strip()
+        titolo_acquisto = st.selectbox("Nome Titolo", TITOLI_VALIDI)
         qta_acquisto = st.number_input("Quantità", min_value=1, value=100, step=1)
         prezzo_acquisto = st.number_input("Prezzo di carico (€)", min_value=0.001, value=10.00, step=0.01, format="%.3f")
         submit_acquisto = st.form_submit_button("Conferma Acquisto")
@@ -275,8 +287,10 @@ if st.session_state["ruolo"] == "admin":
                 try:
                     transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titolo_acquisto, prezzo_acquisto)
                     st.success("Acquisto registrato con successo! ✅")
+                    st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
+                    logger.error(f"Transazione acquisto fallita: {e}")
                     st.error(f"Transazione fallita: {e}")
 
     st.sidebar.divider()
@@ -299,10 +313,12 @@ if st.session_state["ruolo"] == "admin":
                         success = transazione_vendita(transaction, user_ref, indice)
                         if success:
                             st.success("Vendita completata! ✅")
+                            st.cache_data.clear()
                             st.rerun()
                         else:
                             st.error("Errore: Impossibile trovare il lotto.")
                     except Exception as e:
+                        logger.error(f"Transazione vendita fallita: {e}")
                         st.error(f"Transazione fallita: {e}")
         else:
             st.sidebar.info("Nessun titolo in portafoglio.")
