@@ -202,19 +202,37 @@ def salva_mercato(prezzi, dividendi):
     })
 
 def get_ticker_yahoo(nome_titolo):
-    mappa_fissa = {"ENI": "ENI.MI", "Leonardo": "LDO.MI", "Ferragamo": "SFER.MI"}
+    # CHIAVI TUTTE IN MAIUSCOLO per matchare con l'input .upper().strip()
+    mappa_fissa = {"ENI": "ENI.MI", "LEONARDO": "LDO.MI", "FERRAGAMO": "SFER.MI"}
     return mappa_fissa.get(nome_titolo, f"{nome_titolo}.MI" if "." not in nome_titolo else nome_titolo)
 
 def format_ita(valore, decimali=2):
     str_val = f"{int(valore):,}" if decimali == 0 else f"{float(valore):,.{decimali}f}"
     return str_val.replace(',', 'X').replace('.', ',').replace('X', '.')
 
-# --- SIDEBAR (VISIBILE A TUTTI) ---
+# --- SIDEBAR CON AVATAR CSS ---
 st.sidebar.title(f"Ciao {st.session_state['nome_portafoglio']}")
 
-foto_profilo = f"{st.session_state['utente']}.jpg"
-if os.path.exists(foto_profilo):
-    st.sidebar.image(foto_profilo, use_container_width=True)
+# Genera un avatar circolare con l'iniziale del nome tramite CSS puro
+iniziale = st.session_state["nome_portafoglio"][0].upper()
+st.sidebar.markdown(f"""
+    <div style="
+        width: 100px; 
+        height: 100px; 
+        border-radius: 50%; 
+        background-color: #3B82F6; 
+        color: white; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        font-size: 40px; 
+        font-weight: bold;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    ">
+        {iniziale}
+    </div>
+""", unsafe_allow_html=True)
 
 st.sidebar.button("🚪 Esci (Logout)", on_click=esegui_logout)
 st.sidebar.divider()
