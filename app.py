@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import yfinance as yf
 import logging
-import db  # ⬅️ IMPORTIAMO IL NOSTRO NUOVO MOTORE DATABASE!
+import db
 
 # --- CONFIGURAZIONE LOGGING ---
 logger = logging.getLogger(__name__)
@@ -53,9 +53,6 @@ if "utente" not in st.session_state:
     st.session_state["utente"] = None
     st.session_state["ruolo"] = None
     st.session_state["nome_portafoglio"] = None
-
-# Avvia il check iniziale del database
-db.setup_iniziale_db()
 
 # --- LOGICA DI LOGIN ---
 def esegui_login():
