@@ -15,7 +15,6 @@ logging.basicConfig(level=logging.INFO)
 # --- CONFIGURAZIONE PAGINA E INIEZIONE CSS ADATTIVO (CHIARO/SCURO) ---
 st.set_page_config(page_title="Wealth Management", page_icon="🏦", layout="wide")
 
-# CSS Modificato con colori semi-trasparenti per adattarsi sia al Tema Chiaro che Scuro
 st.markdown("""
 <style>
 div[data-testid="stMetric"] {
@@ -47,7 +46,6 @@ LOGHI_AZIENDE = {
 }
 TITOLI_VALIDI = ["ENI", "LEONARDO", "FERRAGAMO"]
 
-# Gestione dinamica delle aliquote fiscali dai secrets (default 26%)
 ALIQUOTE_TASSE = {
     "plusvalenza": float(st.secrets.get("tax", {}).get("capital_gains", 0.26)),
     "dividendi": float(st.secrets.get("tax", {}).get("dividends", 0.26)),
@@ -116,8 +114,10 @@ def esegui_login():
             st.session_state["utente"] = user_input
             st.session_state["ruolo"] = dati_utente["ruolo"]
             st.session_state["nome_portafoglio"] = dati_utente["nome_portafoglio"]
+            logger.info(f"Login effettuato con successo: {user_input}")
             return
             
+    logger.warning(f"Tentativo di login fallito per utente: {user_input}")
     st.error("Credenziali errate o utente inesistente.")
 
 def esegui_logout():
@@ -125,14 +125,23 @@ def esegui_logout():
     st.session_state["ruolo"] = None
     st.session_state["nome_portafoglio"] = None
 
-# --- SCHERMATA DI LOGIN BLOCCANTE ---
+# --- SCHERMATA DI LOGIN BLOCCANTE (STILE WORDPRESS) ---
 if not st.session_state["utente"]:
-    st.title("🏦 Piattaforma Gestione Patrimonio")
-    st.markdown("Inserisci le credenziali per accedere al tuo portafoglio sicuro.")
-    with st.form("login_form"):
-        st.text_input("Utente", key="user_input")
-        st.text_input("Password", type="password", key="psw_input")
-        st.form_submit_button("Accedi", on_click=esegui_login)
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    
+    # Layout a 3 colonne per centrare il contenuto
+    col_spacer_sx, col_centro, col_spacer_dx = st.columns([1, 1.2, 1])
+    
+    with col_centro:
+        st.markdown("<div style='text-align: center; font-size: 70px; color: #3B82F6;'>🏦</div>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: center; margin-bottom: 25px; font-family: sans-serif;'>Gestione Patrimonio</h3>", unsafe_allow_html=True)
+        
+        with st.form("login_form", clear_on_submit=False):
+            st.text_input("Nome utente o indirizzo email", key="user_input")
+            st.text_input("Password", type="password", key="psw_input")
+            # Pulsante 'primary' per renderlo azzurro acceso e use_container_width per la larghezza totale
+            st.form_submit_button("Login", on_click=esegui_login, type="primary", use_container_width=True)
+            
     st.stop()
 
 # --- RECUPERO DATI AUTORIZZATI ---
@@ -220,16 +229,15 @@ def format_ita(valore, decimali=2):
 # --- SIDEBAR CON SCUDO ARALDICO ---
 st.sidebar.title(f"Ciao {st.session_state['nome_portafoglio']}")
 
-# Genera uno stemma a forma di scudo con l'iniziale
 iniziale = st.session_state["nome_portafoglio"][0].upper()
 st.sidebar.markdown(f"""
     <div style="
         width: 90px; 
         height: 100px; 
-        border-radius: 12px 12px 45px 45px; /* Forma a Scudo */
-        background: linear-gradient(135deg, #7A0016 0%, #3B0008 100%); /* Rosso Nobile / Cremisi */
-        border: 4px solid #D4AF37; /* Bordo Oro */
-        color: #FDF5E6; /* Testo Pergamena */
+        border-radius: 12px 12px 45px 45px;
+        background: linear-gradient(135deg, #7A0016 0%, #3B0008 100%);
+        border: 4px solid #D4AF37;
+        color: #FDF5E6;
         display: flex; 
         align-items: center; 
         justify-content: center; 
@@ -374,7 +382,6 @@ if st.session_state["ruolo"] == "admin":
             colori_distinti = ['#3B82F6', '#F59E0B', '#10B981', '#8B5CF6', '#EC4899']
             fig_pie = px.pie(df_dist, values='Valore', names='Titolo', hole=0.4, color_discrete_sequence=colori_distinti, custom_data=['Testo_Hover'])
             fig_pie.update_traces(pull=[0.02]*len(df_dist), hovertemplate="<b>%{label}</b><br>Valore: %{customdata[0]}<extra></extra>", marker=dict(line=dict(color='#0E1117', width=2)))
-            # Rimosso il font fisso per permettere al grafico di adattarsi al Tema Chiaro o Scuro
             fig_pie.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_pie, use_container_width=True)
 
@@ -383,7 +390,6 @@ if st.session_state["ruolo"] == "admin":
         df_bar = pd.DataFrame({"Categoria": ["Investito", "Valore Attuale"], "Importo (€)": [totale_investito, totale_attuale], "Testo": [f"{format_ita(totale_investito)} €", f"{format_ita(totale_attuale)} €"]})
         fig_bar = px.bar(df_bar, x="Categoria", y="Importo (€)", color="Categoria", text="Testo", color_discrete_sequence=['#64748B', '#10B981'])
         fig_bar.update_traces(width=0.3, textposition='outside', hovertemplate="<b>%{x}</b><br>%{text}<extra></extra>")
-        # Rimosso il font fisso per adattabilità
         fig_bar.update_layout(showlegend=False, height=600, margin=dict(t=30, b=30), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         fig_bar.update_yaxes(visible=False)
         st.plotly_chart(fig_bar, use_container_width=True)
