@@ -7,16 +7,17 @@ from firebase_admin import credentials, firestore
 import os
 import bcrypt
 
-# --- CONFIGURAZIONE PAGINA E INIEZIONE CSS/HTML ---
+# --- CONFIGURAZIONE PAGINA E INIEZIONE CSS ADATTIVO (CHIARO/SCURO) ---
 st.set_page_config(page_title="Wealth Management", page_icon="🏦", layout="wide")
 
+# CSS Modificato con colori semi-trasparenti per adattarsi sia al Tema Chiaro che Scuro
 st.markdown("""
 <style>
 div[data-testid="stMetric"] {
-    background-color: #1E293B;
+    background-color: rgba(130, 150, 180, 0.15);
     border-radius: 12px;
     padding: 15px 20px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     border-left: 5px solid #3B82F6;
     transition: transform 0.2s ease-in-out;
 }
@@ -24,8 +25,8 @@ div[data-testid="stMetric"]:hover {
     transform: scale(1.02);
 }
 th {
-    background-color: #0F172A !important;
-    color: #94A3B8 !important;
+    background-color: rgba(130, 150, 180, 0.2) !important;
+    color: inherit !important;
     font-size: 14px;
 }
 </style>
@@ -158,7 +159,6 @@ dati = carica_dati_autorizzati(st.session_state["utente"], st.session_state["ruo
 # --- LOGICA TRANSAZIONALE ATOMIC (ACID) ---
 @firestore.transactional
 def transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titolo, prezzo):
-    # LOCK & LETTURA
     user_snap = user_ref.get(transaction=transaction)
     mercato_snap = mercato_ref.get(transaction=transaction)
     
@@ -166,7 +166,6 @@ def transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titolo
     portafoglio = user_dati.get("portafoglio", [])
     mercato_dati = mercato_snap.to_dict() if mercato_snap.exists else {"prezzi_attuali": {}, "dividendi_annui": {}}
     
-    # CALCOLO & AGGIORNAMENTO DATI
     portafoglio.append(nuovo_lotto)
     
     aggiorna_merc = False
@@ -177,7 +176,6 @@ def transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titolo
         mercato_dati["dividendi_annui"][titolo] = 0.0
         aggiorna_merc = True
         
-    # SCRITTURA ATOMIC
     transaction.update(user_ref, {"portafoglio": portafoglio})
     if aggiorna_merc:
         transaction.set(mercato_ref, mercato_dati, merge=True)
@@ -202,7 +200,6 @@ def salva_mercato(prezzi, dividendi):
     })
 
 def get_ticker_yahoo(nome_titolo):
-    # CHIAVI TUTTE IN MAIUSCOLO per matchare con l'input .upper().strip()
     mappa_fissa = {"ENI": "ENI.MI", "LEONARDO": "LDO.MI", "FERRAGAMO": "SFER.MI"}
     return mappa_fissa.get(nome_titolo, f"{nome_titolo}.MI" if "." not in nome_titolo else nome_titolo)
 
@@ -210,25 +207,28 @@ def format_ita(valore, decimali=2):
     str_val = f"{int(valore):,}" if decimali == 0 else f"{float(valore):,.{decimali}f}"
     return str_val.replace(',', 'X').replace('.', ',').replace('X', '.')
 
-# --- SIDEBAR CON AVATAR CSS ---
+# --- SIDEBAR CON SCUDO ARALDICO ---
 st.sidebar.title(f"Ciao {st.session_state['nome_portafoglio']}")
 
-# Genera un avatar circolare con l'iniziale del nome tramite CSS puro
+# Genera uno stemma a forma di scudo con l'iniziale
 iniziale = st.session_state["nome_portafoglio"][0].upper()
 st.sidebar.markdown(f"""
     <div style="
-        width: 100px; 
+        width: 90px; 
         height: 100px; 
-        border-radius: 50%; 
-        background-color: #3B82F6; 
-        color: white; 
+        border-radius: 12px 12px 45px 45px; /* Forma a Scudo */
+        background: linear-gradient(135deg, #7A0016 0%, #3B0008 100%); /* Rosso Nobile / Cremisi */
+        border: 4px solid #D4AF37; /* Bordo Oro */
+        color: #FDF5E6; /* Testo Pergamena */
         display: flex; 
         align-items: center; 
         justify-content: center; 
-        font-size: 40px; 
+        font-size: 55px; 
+        font-family: 'Times New Roman', Times, serif;
         font-weight: bold;
         margin-bottom: 20px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        box-shadow: 0 6px 12px rgba(0,0,0,0.5), inset 0 0 15px rgba(0,0,0,0.7);
+        text-shadow: 3px 3px 6px rgba(0,0,0,0.8);
     ">
         {iniziale}
     </div>
@@ -358,7 +358,8 @@ if st.session_state["ruolo"] == "admin":
             colori_distinti = ['#3B82F6', '#F59E0B', '#10B981', '#8B5CF6', '#EC4899']
             fig_pie = px.pie(df_dist, values='Valore', names='Titolo', hole=0.4, color_discrete_sequence=colori_distinti, custom_data=['Testo_Hover'])
             fig_pie.update_traces(pull=[0.02]*len(df_dist), hovertemplate="<b>%{label}</b><br>Valore: %{customdata[0]}<extra></extra>", marker=dict(line=dict(color='#0E1117', width=2)))
-            fig_pie.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#FAFAFA'))
+            # Rimosso il font fisso per permettere al grafico di adattarsi al Tema Chiaro o Scuro
+            fig_pie.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_pie, use_container_width=True)
 
     with col_chart2:
@@ -366,7 +367,8 @@ if st.session_state["ruolo"] == "admin":
         df_bar = pd.DataFrame({"Categoria": ["Investito", "Valore Attuale"], "Importo (€)": [totale_investito, totale_attuale], "Testo": [f"{format_ita(totale_investito)} €", f"{format_ita(totale_attuale)} €"]})
         fig_bar = px.bar(df_bar, x="Categoria", y="Importo (€)", color="Categoria", text="Testo", color_discrete_sequence=['#64748B', '#10B981'])
         fig_bar.update_traces(width=0.3, textposition='outside', hovertemplate="<b>%{x}</b><br>%{text}<extra></extra>")
-        fig_bar.update_layout(showlegend=False, height=600, margin=dict(t=30, b=30), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#FAFAFA'))
+        # Rimosso il font fisso per adattabilità
+        fig_bar.update_layout(showlegend=False, height=600, margin=dict(t=30, b=30), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         fig_bar.update_yaxes(visible=False)
         st.plotly_chart(fig_bar, use_container_width=True)
     st.divider()
