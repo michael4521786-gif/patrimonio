@@ -104,7 +104,7 @@ def carica_dati_autorizzati_cached(utente, ruolo):
 dati = carica_dati_autorizzati_cached(st.session_state["utente"], st.session_state["ruolo"])
 
 # --- FUNZIONI DI SUPPORTO ---
-def get_ticker_alpha(nome_titolo):
+def get_ticker_yahoo(nome_titolo):
     mappa_fissa = {"ENI": "ENI.MI", "LEONARDO": "LDO.MI", "FERRAGAMO": "SFER.MI"}
     return mappa_fissa.get(nome_titolo, f"{nome_titolo}.MI" if "." not in nome_titolo else nome_titolo)
 
@@ -112,32 +112,52 @@ def format_ita(valore, decimali=2):
     str_val = f"{int(valore):,}" if decimali == 0 else f"{float(valore):,.{decimali}f}"
     return str_val.replace(',', 'X').replace('.', ',').replace('X', '.')
 
-def scarica_prezzo_alpha_vantage(ticker):
-    api_key = st.secrets.get("alphavantage", {}).get("key", "demo")
-    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={api_key}"
+def scarica_prezzo_yahoo_diretto(ticker):
+    """
+    Scarica il prezzo direttamente dalle API di Yahoo Finance usando una sessione HTTP 
+    con cookie di autenticazione simulati per evitare blocchi cloud.
+    """
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    })
     
     try:
-        response = requests.get(url, timeout=5)
+        # Inizializza la sessione su Yahoo per acquisire i cookie necessari
+        session.get("https://finance.yahoo.com", timeout=5)
+        
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=5d&interval=1d"
+        response = session.get(url, timeout=5)
+        
         if response.status_code == 200:
             data = response.json()
-            quote = data.get("Global Quote", {})
-            prezzo_str = quote.get("05. price")
-            
-            if prezzo_str:
-                prezzo = float(prezzo_str)
-                if prezzo > 0:
-                    return round(prezzo, 2)
+            result = data.get('chart', {}).get('result')
+            if result:
+                meta = result[0].get('meta', {})
+                # Legge il prezzo di mercato corrente
+                prezzo = meta.get('regularMarketPrice')
+                
+                # Se non c'è il live, prende l'ultimo prezzo di chiusura valido dallo storico
+                if not prezzo:
+                    indicators = result[0].get('indicators', {}).get('quote', [{}])[0]
+                    closes = indicators.get('close', [])
+                    valid_closes = [c for c in closes if c is not None]
+                    if valid_closes:
+                        prezzo = valid_closes[-1]
+                        
+                if prezzo and float(prezzo) > 0:
+                    return round(float(prezzo), 2)
                     
-        logger.warning(f"Impossibile leggere il prezzo per {ticker} da Alpha Vantage.")
+        logger.warning(f"Impossibile estrarre il prezzo per {ticker} da Yahoo Finance.")
     except Exception as e:
-        logger.error(f"Errore di connessione ad Alpha Vantage per {ticker}: {e}")
+        logger.error(f"Errore di connessione a Yahoo per {ticker}: {e}")
         
     return None
 
 # --- SIDEBAR CON SCUDO ARALDICO ---
 st.sidebar.title(f"Ciao {st.session_state['nome_portafoglio']}")
 
-iniziale = st.session_state["nome_portafoglio"][0].upper()
+iniziale = st.sidebar.nome_portafoglio[0].upper() if hasattr(st.sidebar, 'nome_portafoglio') else st.session_state['nome_portafoglio'][0].upper()
 st.sidebar.markdown(f"""
     <div style="
         width: 90px; 
@@ -167,16 +187,16 @@ st.sidebar.divider()
 if st.session_state["ruolo"] == "admin":
     st.sidebar.subheader("🌐 Sincronizzazione Borsa")
     if st.sidebar.button("📥 Scarica Prezzi in Tempo Reale"):
-        with st.spinner("⏳ Scaricamento prezzi da Alpha Vantage..."):
+        with st.spinner("⏳ Scaricamento prezzi da Yahoo Finance..."):
             prezzi_aggiornati = {}
             titoli_aggiornati = []
             errori = []
             
             for nome_titolo in TITOLI_VALIDI:
-                ticker = get_ticker_alpha(nome_titolo)
-                logger.info(f"Scaricamento {nome_titolo} ({ticker}) via Alpha Vantage...")
+                ticker = get_ticker_yahoo(nome_titolo)
+                logger.info(f"Scaricamento {nome_titolo} ({ticker})...")
                 
-                prezzo = scarica_prezzo_alpha_vantage(ticker)
+                prezzo = scarica_prezzo_yahoo_diretto(ticker)
                 
                 if prezzo is not None and prezzo > 0:
                     prezzi_aggiornati[nome_titolo] = prezzo
@@ -186,7 +206,7 @@ if st.session_state["ruolo"] == "admin":
                     errori.append(nome_titolo)
                     st.sidebar.warning(f"⚠️ {nome_titolo}: prezzo non disponibile")
                 
-                time.sleep(1)
+                time.sleep(0.5)
             
             if titoli_aggiornati:
                 dati["prezzi_attuali"].update(prezzi_aggiornati)
@@ -195,7 +215,7 @@ if st.session_state["ruolo"] == "admin":
                 st.cache_data.clear()
                 st.rerun()
             else:
-                st.sidebar.error("❌ Impossibile scaricare i prezzi. Verifica l'API key di Alpha Vantage nei secrets.")
+                st.sidebar.error("❌ Impossibile scaricare i prezzi in questo momento. Riprova tra poco.")
 
     st.sidebar.divider()
     st.sidebar.subheader("🛒 Registra Acquisto")
