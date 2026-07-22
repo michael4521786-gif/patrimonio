@@ -46,34 +46,47 @@ LOGHI_AZIENDE = {
     "LEONARDO": "https://www.google.com/s2/favicons?domain=leonardo.com&sz=128#.png",
     "FERRAGAMO": "https://www.google.com/s2/favicons?domain=ferragamo.com&sz=128#.png"
 }
-TITOLI_VALIDI = ["ENI", "LEONARDO", "FERRAGAMO"]
 
 ALIQUOTE_TASSE = {
     "plusvalenza": float(st.secrets.get("tax", {}).get("capital_gains", 0.26)),
     "dividendi": float(st.secrets.get("tax", {}).get("dividends", 0.26)),
 }
 
-# --- GESTIONE SESSIONE ---
+# --- GESTIONE SESSIONE & RATE LIMITING LOGIN ---
 if "utente" not in st.session_state:
     st.session_state["utente"] = None
     st.session_state["ruolo"] = None
     st.session_state["nome_portafoglio"] = None
 
-# --- LOGICA DI LOGIN ---
+if "tentativi_falliti" not in st.session_state:
+    st.session_state["tentativi_falliti"] = 0
+
+# --- LOGICA DI LOGIN CON RATE LIMITING (MAX 4 TENTATIVI) ---
 def esegui_login():
+    if st.session_state["tentativi_falliti"] >= 4:
+        st.error("🚫 Accesso temporaneamente bloccato per troppi tentativi falliti. Ricarica la pagina.")
+        return
+
     user_input = st.session_state.user_input.lower()
     psw_input = st.session_state.psw_input
     
     successo, dati_utente = db.verifica_credenziali(user_input, psw_input)
     
     if successo:
+        st.session_state["tentativi_falliti"] = 0  # Reset contatore al successo
         st.session_state["utente"] = user_input
         st.session_state["ruolo"] = dati_utente["ruolo"]
         st.session_state["nome_portafoglio"] = dati_utente["nome_portafoglio"]
         logger.info(f"Login effettuato con successo: {user_input}")
     else:
-        logger.warning(f"Tentativo di login fallito per utente: {user_input}")
-        st.error("Credenziali errate o utente inesistente.")
+        st.session_state["tentativi_falliti"] += 1
+        rimanenti = max(0, 4 - st.session_state["tentativi_falliti"])
+        logger.warning(f"Tentativo di login fallito per utente: {user_input}. Rimasti: {rimanenti}")
+        
+        if rimanenti == 0:
+            st.error("🚫 Troppi tentativi falliti. Accesso bloccato.")
+        else:
+            st.error(f"Credenziali errate. Tentativi rimanenti prima del blocco: {rimanenti}")
 
 def esegui_logout():
     st.session_state["utente"] = None
@@ -103,10 +116,18 @@ def carica_dati_autorizzati_cached(utente, ruolo):
 
 dati = carica_dati_autorizzati_cached(st.session_state["utente"], st.session_state["ruolo"])
 
-# --- FUNZIONI DI SUPPORTO ---
+# --- FUNZIONI DI SUPPORTO E TICKER DINAMICI ---
 def get_ticker_yahoo(nome_titolo):
+    """
+    Gestisce ticker dinamici: se è un titolo noto italiano usa il suffisso .MI,
+    altrimenti se l'utente digita un ticker con punto (es. AAPL o ENI.MI) lo usa direttamente,
+    altrimenti aggiunge .MI di default per la borsa italiana.
+    """
+    nome = nome_titolo.upper().strip()
     mappa_fissa = {"ENI": "ENI.MI", "LEONARDO": "LDO.MI", "FERRAGAMO": "SFER.MI"}
-    return mappa_fissa.get(nome_titolo.upper().strip(), f"{nome_titolo}.MI" if "." not in nome_titolo else nome_titolo)
+    if nome in mappa_fissa:
+        return mappa_fissa[nome]
+    return nome if "." in nome else f"{nome}.MI"
 
 def format_ita(valore, decimali=2):
     str_val = f"{int(valore):,}" if decimali == 0 else f"{float(valore):,.{decimali}f}"
@@ -179,19 +200,26 @@ st.sidebar.divider()
 if st.session_state["ruolo"] == "admin":
     st.sidebar.subheader("🌐 Sincronizzazione Borsa")
     if st.sidebar.button("📥 Scarica Prezzi in Tempo Reale"):
-        with st.spinner("⏳ Scaricamento prezzi da Yahoo Finance..."):
+        with st.spinner("⏳ Scaricamento prezzi in tempo reale..."):
             prezzi_aggiornati = {}
             titoli_aggiornati = []
             errori = []
             
-            for nome_titolo in TITOLI_VALIDI:
+            # Raccoglie dinamicamente TUTTI i titoli presenti nei portafogli e nel mercato
+            titoli_da_aggiornare = set(dati["prezzi_attuali"].keys())
+            for m_lotti in dati["portafoglio"].values():
+                for l in m_lotti:
+                    if "titolo" in l:
+                        titoli_da_aggiornare.add(l["titolo"].upper().strip())
+            
+            for nome_titolo in titoli_da_aggiornare:
                 ticker = get_ticker_yahoo(nome_titolo)
                 logger.info(f"Scaricamento {nome_titolo} ({ticker})...")
                 
                 prezzo = scarica_prezzo_yahoo_diretto(ticker)
                 
                 if prezzo is not None and prezzo > 0:
-                    prezzi_aggiornati[nome_titolo.upper().strip()] = prezzo
+                    prezzi_aggiornati[nome_titolo] = prezzo
                     titoli_aggiornati.append(nome_titolo)
                     st.sidebar.success(f"✅ {nome_titolo}: €{prezzo:.2f}")
                 else:
@@ -203,17 +231,18 @@ if st.session_state["ruolo"] == "admin":
             if titoli_aggiornati:
                 dati["prezzi_attuali"].update(prezzi_aggiornati)
                 db.salva_mercato(dati["prezzi_attuali"], dati["dividendi_annui"])
-                st.sidebar.success(f"✅ Sincronizzati {len(titoli_aggiornati)}/{len(TITOLI_VALIDI)} titoli!")
+                st.sidebar.success(f"✅ Sincronizzati {len(titoli_aggiornati)} titoli!")
                 st.cache_data.clear()
                 st.rerun()
             else:
-                st.sidebar.error("❌ Impossibile scaricare i prezzi in questo momento. Riprova tra poco.")
+                st.sidebar.error("❌ Impossibile scaricare i prezzi in questo momento.")
 
     st.sidebar.divider()
-    st.sidebar.subheader("🛒 Registra Acquisto")
+    st.sidebar.subheader("🛒 Registra Acquisto (Multi-Titolo)")
     with st.sidebar.form("form_acquisto"):
         membro_acquisto = st.selectbox("Chi acquista?", ORDINE_FAMIGLIA)
-        titolo_acquisto = st.selectbox("Nome Titolo", TITOLI_VALIDI)
+        # Campo di testo libero per inserire qualsiasi titolo/ticker
+        titolo_acquisto = st.text_input("Nome Titolo o Ticker (es. ENI, AAPL, TESLA)").upper().strip()
         qta_acquisto = st.number_input("Quantità", min_value=1, value=100, step=1)
         prezzo_acquisto = st.number_input("Prezzo di carico (€)", min_value=0.001, value=10.00, step=0.01, format="%.3f")
         submit_acquisto = st.form_submit_button("Conferma Acquisto")
@@ -221,9 +250,9 @@ if st.session_state["ruolo"] == "admin":
         if submit_acquisto and titolo_acquisto:
             user_id = ID_UTENTI.get(membro_acquisto)
             if user_id:
-                nuovo_lotto = {"titolo": titolo_acquisto.upper().strip(), "quantita": qta_acquisto, "prezzo_carico": prezzo_acquisto}
+                nuovo_lotto = {"titolo": titolo_acquisto, "quantita": qta_acquisto, "prezzo_carico": prezzo_acquisto}
                 try:
-                    db.registra_acquisto(user_id, nuovo_lotto, titolo_acquisto.upper().strip(), prezzo_acquisto)
+                    db.registra_acquisto(user_id, nuovo_lotto, titolo_acquisto, prezzo_acquisto)
                     st.success("Acquisto registrato con successo! ✅")
                     st.cache_data.clear()
                     st.rerun()
@@ -266,7 +295,7 @@ dati_grafico_distribuzione = []
 
 for membro, lotti in dati["portafoglio"].items():
     for lotto in lotti:
-        titolo = lotto["titolo"].upper().strip()  # Normalizzazione maiuscola
+        titolo = lotto["titolo"].upper().strip()
         quantita = lotto["quantita"]
         prezzo_carico = lotto["prezzo_carico"]
         prezzo_attuale = dati["prezzi_attuali"].get(titolo, lotto["prezzo_carico"])
@@ -306,7 +335,7 @@ if st.session_state["ruolo"] == "admin":
         if dati_grafico_distribuzione:
             df_dist = pd.DataFrame(dati_grafico_distribuzione).groupby("Titolo").sum().reset_index()
             df_dist['Testo_Hover'] = df_dist['Valore'].apply(lambda x: f"{format_ita(x)} €")
-            colori_distinti = ['#3B82F6', '#F59E0B', '#10B981', '#8B5CF6', '#EC4899']
+            colori_distinti = ['#3B82F6', '#F59E0B', '#10B981', '#8B5CF6', '#EC4899', '#6366F1', '#14B8A6']
             fig_pie = px.pie(df_dist, values='Valore', names='Titolo', hole=0.4, color_discrete_sequence=colori_distinti, custom_data=['Testo_Hover'])
             fig_pie.update_traces(pull=[0.02]*len(df_dist), hovertemplate="<b>%{label}</b><br>Valore: %{customdata[0]}<extra></extra>", marker=dict(line=dict(color='#0E1117', width=2)))
             fig_pie.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
@@ -352,7 +381,7 @@ for i, membro in enumerate(membri_da_mostrare):
         tot_azioni = tot_membro_inv = tot_membro_att = tot_plus_netta = tot_div_annuo = tot_div_trimestrale = 0
         
         for lotto in lotti:
-            titolo = lotto["titolo"].upper().strip()  # Normalizzazione maiuscola
+            titolo = lotto["titolo"].upper().strip()
             q = lotto["quantita"]
             pc = lotto["prezzo_carico"]
             pa = dati["prezzi_attuali"].get(titolo, lotto["prezzo_carico"])
