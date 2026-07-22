@@ -362,9 +362,9 @@ for i, membro in enumerate(membri_da_mostrare):
                 "Investito (€)": format_ita(inv, 2),
                 "Valore Attuale (€)": format_ita(att, 2), 
                 "Plus/Minus Netta (€)": f"{segno}{format_ita(plus_netta, 2)}",
-                "Div. Azione (€)": str_div_unitario, # <-- NUOVA COLONNA DIVIDENDO UNITARIO
+                "Div. Az. (€)": str_div_unitario,          # <--- INTESTAZIONE ACCORCIATA
                 "Div. Annuo Netto": f"{format_ita(div_annuo_netto, 2)} €", 
-                "Div. Trimestrale Netto": str_trimestrale
+                "Div. Trim. Netto": str_trimestrale       # <--- INTESTAZIONE ACCORCIATA
             })
         
         segno_tot = "+" if tot_plus_netta > 0 else ""
@@ -374,7 +374,7 @@ for i, membro in enumerate(membri_da_mostrare):
             "Logo": "", "Titolo": "TOTALE", "Azioni": format_ita(tot_azioni, 0), "Prezzo Carico (€)": "-",
             "Prezzo Mercato (€)": "-", "Investito (€)": format_ita(tot_membro_inv, 2),
             "Valore Attuale (€)": format_ita(tot_membro_att, 2), "Plus/Minus Netta (€)": f"{segno_tot}{format_ita(tot_plus_netta, 2)}",
-            "Div. Azione (€)": "-", "Div. Annuo Netto": f"{format_ita(tot_div_annuo, 2)} €", "Div. Trimestrale Netto": str_tot_trimestrale
+            "Div. Az. (€)": "-", "Div. Annuo Netto": f"{format_ita(tot_div_annuo, 2)} €", "Div. Trim. Netto": str_tot_trimestrale
         })
         
         df = pd.DataFrame(righe)
