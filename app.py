@@ -79,7 +79,7 @@ def esegui_logout():
     st.session_state["ruolo"] = None
     st.session_state["nome_portafoglio"] = None
 
-# --- SCHERMATA DI LOGIN BLOCCANTE (STILE WORDPRESS) ---
+# --- SCHERMATA DI LOGIN BLOCCANTE ---
 if not st.session_state["utente"]:
     st.markdown("<br><br><br>", unsafe_allow_html=True)
     col_spacer_sx, col_centro, col_spacer_dx = st.columns([1, 1.2, 1])
@@ -95,7 +95,7 @@ if not st.session_state["utente"]:
             
     st.stop()
 
-# --- RECUPERO DATI AUTORIZZATI (CON CACHE) ---
+# --- RECUPERO DATI AUTORIZZATI ---
 @st.cache_data(ttl=60)
 def carica_dati_autorizzati_cached(utente, ruolo):
     return db.carica_dati_autorizzati(utente, ruolo)
@@ -111,27 +111,43 @@ def format_ita(valore, decimali=2):
     str_val = f"{int(valore):,}" if decimali == 0 else f"{float(valore):,.{decimali}f}"
     return str_val.replace(',', 'X').replace('.', ',').replace('X', '.')
 
-# --- NUOVO DOWNLOADER PREZZI DIRETTO ---
+# --- DOWNLOADER PREZZI ROBUSTO (MULTI-ENDPOINT) ---
 def scarica_prezzi_diretti(tickers_map):
     nuovi_prezzi = {}
+    
+    # Imitiamo un browser reale in modo aggressivo per bypassare i blocchi
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9,it;q=0.8',
     }
     
+    # Proviamo diversi endpoint di Yahoo se uno fallisce
+    endpoints = [
+        "https://query2.finance.yahoo.com/v8/finance/chart/{}",
+        "https://query1.finance.yahoo.com/v8/finance/chart/{}"
+    ]
+    
     for nome, ticker in tickers_map.items():
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1d&interval=1d"
-        try:
-            response = requests.get(url, headers=headers, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                # Naviga nel JSON per trovare l'ultimo prezzo di mercato regolare
-                prezzo = data['chart']['result'][0]['meta']['regularMarketPrice']
-                nuovi_prezzi[nome] = round(float(prezzo), 2)
-            else:
-                logger.warning(f"Errore API Yahoo per {nome}: Status {response.status_code}")
-        except Exception as e:
-            logger.error(f"Eccezione durante il fetch di {nome}: {e}")
-            
+        prezzo_trovato = False
+        
+        for base_url in endpoints:
+            if prezzo_trovato: break
+                
+            url = base_url.format(ticker) + "?range=1d&interval=1d"
+            try:
+                response = requests.get(url, headers=headers, timeout=5)
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'chart' in data and 'result' in data['chart'] and data['chart']['result']:
+                        prezzo = data['chart']['result'][0]['meta']['regularMarketPrice']
+                        nuovi_prezzi[nome] = round(float(prezzo), 2)
+                        prezzo_trovato = True
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Timeout o errore di connessione per {nome} sull'endpoint {base_url}: {e}")
+            except Exception as e:
+                logger.error(f"Errore di parsing per {nome}: {e}")
+                
     return nuovi_prezzi
 
 # --- SIDEBAR CON SCUDO ARALDICO ---
@@ -172,7 +188,6 @@ if st.session_state["ruolo"] == "admin":
             
             if tickers_map:
                 try:
-                    # Chiamata al nuovo downloader diretto
                     nuovi_prezzi = scarica_prezzi_diretti(tickers_map)
                     
                     if nuovi_prezzi:
@@ -180,14 +195,17 @@ if st.session_state["ruolo"] == "admin":
                             dati["prezzi_attuali"][nome] = prezzo
                                 
                         db.salva_mercato(dati["prezzi_attuali"], dati["dividendi_annui"])
-                        st.sidebar.success("Prezzi in Diretta aggiornati! ⚡")
+                        
+                        # Mostra quanti titoli sono stati aggiornati
+                        titoli_aggiornati = list(nuovi_prezzi.keys())
+                        st.sidebar.success(f"Aggiornati: {', '.join(titoli_aggiornati)} ⚡")
                         st.cache_data.clear()
                         st.rerun()
                     else:
-                        st.sidebar.error("Nessun prezzo trovato nell'API.")
+                        st.sidebar.error("Impossibile contattare i server di borsa. Riprova tra poco.")
                 except Exception as e:
                     logger.error(f"Errore generale Sincronizzazione: {e}")
-                    st.sidebar.error("Errore di connessione a Yahoo Finance.")
+                    st.sidebar.error("Errore irreversibile di connessione.")
 
     st.sidebar.divider()
     st.sidebar.subheader("🛒 Registra Acquisto")
