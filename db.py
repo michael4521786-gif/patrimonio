@@ -28,16 +28,16 @@ def setup_iniziale_db():
         if not mercato_doc.exists:
             mercato_ref.set({
                 "prezzi_attuali": {"ENI": 0.0, "LEONARDO": 0.0, "FERRAGAMO": 0.0},
-                "dividendi_annui": {"ENI": 0.0, "LEONARDO": 0.68, "FERRAGAMO": 0.0}
+                "dividendi_annui": {"ENI": 0.0, "LEONARDO": 0.63, "FERRAGAMO": 0.0}
             })
         else:
-            # Assicura che Leonardo abbia il dividendo corretto a 0.68 se è a 0 o mancante
+            # Assicura che Leonardo abbia il dividendo corretto a 0.63 se diverso o mancante
             mercato_dati = mercato_doc.to_dict() or {}
             dividendi = mercato_dati.get("dividendi_annui", {})
-            if dividendi.get("LEONARDO", 0.0) != 0.68:
-                dividendi["LEONARDO"] = 0.68
+            if dividendi.get("LEONARDO", 0.0) != 0.63:
+                dividendi["LEONARDO"] = 0.63
                 mercato_ref.update({"dividendi_annui": dividendi})
-                logger.info("✅ Dividendo Leonardo aggiornato a 0.68 € nel database")
+                logger.info("✅ Dividendo Leonardo aggiornato a 0.63 € nel database")
 
         if db.collection("utenti").document("enzo").get().exists:
             logger.info("Database utenti già inizializzato")
