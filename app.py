@@ -129,7 +129,6 @@ def esegui_logout():
 if not st.session_state["utente"]:
     st.markdown("<br><br><br>", unsafe_allow_html=True)
     
-    # Layout a 3 colonne per centrare il contenuto
     col_spacer_sx, col_centro, col_spacer_dx = st.columns([1, 1.2, 1])
     
     with col_centro:
@@ -139,12 +138,11 @@ if not st.session_state["utente"]:
         with st.form("login_form", clear_on_submit=False):
             st.text_input("Nome utente o indirizzo email", key="user_input")
             st.text_input("Password", type="password", key="psw_input")
-            # Pulsante 'primary' per renderlo azzurro acceso e use_container_width per la larghezza totale
             st.form_submit_button("Login", on_click=esegui_login, type="primary", use_container_width=True)
             
     st.stop()
 
-# --- RECUPERO DATI AUTORIZZATI ---
+# --- RECUPERO DATI AUTORIZZATI (CON CACHE OTTIMIZZATA) ---
 def carica_dati_autorizzati(utente, ruolo):
     dati = {"portafoglio": {}, "prezzi_attuali": {}, "dividendi_annui": {}}
     
@@ -169,7 +167,7 @@ def carica_dati_autorizzati(utente, ruolo):
             
     return dati
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def carica_dati_autorizzati_cached(utente, ruolo):
     return carica_dati_autorizzati(utente, ruolo)
 
@@ -259,21 +257,36 @@ st.sidebar.divider()
 if st.session_state["ruolo"] == "admin":
     st.sidebar.subheader("🌐 Sincronizzazione Borsa")
     if st.sidebar.button("📥 Scarica Prezzi in Tempo Reale"):
-        with st.spinner("Connessione a Yahoo Finance in corso..."):
-            for nome_titolo in dati["prezzi_attuali"].keys():
-                ticker = get_ticker_yahoo(nome_titolo)
+        with st.spinner("Scaricamento dati in batch da Yahoo Finance..."):
+            tickers_map = {nome: get_ticker_yahoo(nome) for nome in dati["prezzi_attuali"].keys()}
+            tickers_list = list(tickers_map.values())
+            
+            if tickers_list:
                 try:
-                    stock = yf.Ticker(ticker)
-                    dati_storici = stock.history(period="1d")
-                    if not dati_storici.empty:
-                        dati["prezzi_attuali"][nome_titolo] = round(float(dati_storici['Close'].iloc[-1]), 2)
+                    # Chiamata in BATCH singola per tutti i titoli
+                    storico = yf.download(tickers_list, period="1d", progress=False)
+                    if not storico.empty and 'Close' in storico:
+                        close_data = storico['Close']
+                        for nome, ticker in tickers_map.items():
+                            try:
+                                # Gestione output (DataFrame se >1 titolo, Series se 1 solo)
+                                if len(tickers_list) == 1:
+                                    prezzo = float(close_data.iloc[-1])
+                                else:
+                                    prezzo = float(close_data[ticker].iloc[-1])
+                                    
+                                if not pd.isna(prezzo):
+                                    dati["prezzi_attuali"][nome] = round(prezzo, 2)
+                            except Exception as e:
+                                logger.warning(f"Prezzo non trovato o parsing fallito per {nome}: {e}")
+                                
+                    salva_mercato(dati["prezzi_attuali"], dati["dividendi_annui"])
+                    st.sidebar.success("Prezzi sincronizzati in batch!")
+                    st.cache_data.clear() # Svuota la cache per mostrare i nuovi dati
+                    st.rerun()
                 except Exception as e:
-                    logger.error(f"Errore sincronizzazione per {nome_titolo}: {e}")
-                    st.sidebar.warning(f"Impossibile trovare il prezzo per {nome_titolo}")
-            salva_mercato(dati["prezzi_attuali"], dati["dividendi_annui"])
-            st.sidebar.success("Prezzi sincronizzati con successo!")
-            st.cache_data.clear()
-            st.rerun()
+                    logger.error(f"Errore download batch Yahoo Finance: {e}")
+                    st.sidebar.error("Errore di connessione a Yahoo Finance.")
 
     st.sidebar.divider()
     st.sidebar.subheader("🛒 Registra Acquisto")
@@ -295,7 +308,7 @@ if st.session_state["ruolo"] == "admin":
                 try:
                     transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titolo_acquisto, prezzo_acquisto)
                     st.success("Acquisto registrato con successo! ✅")
-                    st.cache_data.clear()
+                    st.cache_data.clear() # Invalida la cache
                     st.rerun()
                 except Exception as e:
                     logger.error(f"Transazione acquisto fallita: {e}")
@@ -321,7 +334,7 @@ if st.session_state["ruolo"] == "admin":
                         success = transazione_vendita(transaction, user_ref, indice)
                         if success:
                             st.success("Vendita completata! ✅")
-                            st.cache_data.clear()
+                            st.cache_data.clear() # Invalida la cache
                             st.rerun()
                         else:
                             st.error("Errore: Impossibile trovare il lotto.")
