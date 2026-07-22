@@ -287,7 +287,11 @@ if st.session_state["ruolo"] == "admin":
     membri_da_mostrare = [m for m in ORDINE_FAMIGLIA if m in dati["portafoglio"]]
     tabs = st.tabs(membri_da_mostrare)
 else:
-    st.subheader("I Tuoi Titoli")
+    if st.session_state["utente"] in ["stefania", "claudia"]:
+        st.subheader("I Tuoi Titoli [Nota: l'investimento iniziale è già al netto della Tobin Tax dello 0,20%]")
+    else:
+        st.subheader("I Tuoi Titoli")
+        
     membri_da_mostrare = [st.session_state["nome_portafoglio"]]
     tabs = [st.container()]
 
