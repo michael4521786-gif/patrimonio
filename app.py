@@ -8,6 +8,7 @@ import os
 import bcrypt
 import logging
 import db
+import time
 
 # --- CONFIGURAZIONE LOGGING ---
 logger = logging.getLogger(__name__)
@@ -111,6 +112,43 @@ def format_ita(valore, decimali=2):
     str_val = f"{int(valore):,}" if decimali == 0 else f"{float(valore):,.{decimali}f}"
     return str_val.replace(',', 'X').replace('.', ',').replace('X', '.')
 
+def scarica_prezzo_yahoo(ticker, max_tentativi=3):
+    """
+    Scarica il prezzo da Yahoo Finance con retry e user-agent
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+    
+    for tentativo in range(max_tentativi):
+        try:
+            stock = yf.Ticker(ticker)
+            # Prova con diversi periodi
+            for periodo in ["1d", "5d", "1mo"]:
+                dati_storici = stock.history(period=periodo)
+                
+                if not dati_storici.empty and 'Close' in dati_storici.columns:
+                    close_data = dati_storici['Close']
+                    serie_valida = close_data.dropna()
+                    
+                    if not serie_valida.empty:
+                        prezzo = float(serie_valida.iloc[-1])
+                        if prezzo > 0:  # Validazione prezzo > 0
+                            logger.info(f"✅ Prezzo {ticker}: €{prezzo:.2f} (periodo: {periodo}, tentativo {tentativo+1})")
+                            return round(prezzo, 2)
+            
+            # Attesa prima del retry
+            if tentativo < max_tentativi - 1:
+                time.sleep(1)
+                
+        except Exception as e:
+            logger.warning(f"Tentativo {tentativo+1} fallito per {ticker}: {str(e)}")
+            if tentativo < max_tentativi - 1:
+                time.sleep(1)
+    
+    logger.error(f"❌ Impossibile scaricare prezzo per {ticker} dopo {max_tentativi} tentativi")
+    return None
+
 # --- SIDEBAR CON SCUDO ARALDICO ---
 st.sidebar.title(f"Ciao {st.session_state['nome_portafoglio']}")
 
@@ -144,38 +182,37 @@ st.sidebar.divider()
 if st.session_state["ruolo"] == "admin":
     st.sidebar.subheader("🌐 Sincronizzazione Borsa")
     if st.sidebar.button("📥 Scarica Prezzi in Tempo Reale"):
-        with st.spinner("Scaricamento dati in batch da Yahoo Finance..."):
-            # ✅ FIX CRITICO: Usa TITOLI_VALIDI (source of truth) 
+        with st.spinner("⏳ Scaricamento prezzi da Yahoo Finance (può impiegare 30 sec)..."):
             prezzi_aggiornati = {}
             titoli_aggiornati = []
+            errori = []
+            
+            st.sidebar.info("🔄 Tentando download...")
             
             for nome_titolo in TITOLI_VALIDI:
                 ticker = get_ticker_yahoo(nome_titolo)
-                try:
-                    stock = yf.Ticker(ticker)
-                    dati_storici = stock.history(period="5d")
-                    
-                    if not dati_storici.empty and 'Close' in dati_storici:
-                        close_data = dati_storici['Close']
-                        serie_valida = close_data.dropna()
-                        
-                        if not serie_valida.empty:
-                            prezzo = float(serie_valida.iloc[-1])
-                            prezzi_aggiornati[nome_titolo] = round(prezzo, 2)
-                            titoli_aggiornati.append(nome_titolo)
-                            logger.info(f"✅ Prezzo scaricato: {nome_titolo} = €{round(prezzo, 2)}")
-                except Exception as e:
-                    logger.error(f"Errore download {nome_titolo}: {e}")
-                    st.sidebar.warning(f"⚠️ {nome_titolo}: {str(e)}")
-                        
+                logger.info(f"Scaricamento {nome_titolo} ({ticker})...")
+                
+                prezzo = scarica_prezzo_yahoo(ticker)
+                
+                if prezzo is not None and prezzo > 0:
+                    prezzi_aggiornati[nome_titolo] = prezzo
+                    titoli_aggiornati.append(nome_titolo)
+                    st.sidebar.success(f"✅ {nome_titolo}: €{prezzo:.2f}")
+                else:
+                    errori.append(nome_titolo)
+                    st.sidebar.warning(f"⚠️ {nome_titolo}: prezzo non disponibile")
+            
+            # Aggiorna il database
             if titoli_aggiornati:
                 dati["prezzi_attuali"].update(prezzi_aggiornati)
                 db.salva_mercato(dati["prezzi_attuali"], dati["dividendi_annui"])
-                st.sidebar.success(f"✅ Aggiornati: {', '.join(titoli_aggiornati)} ⚡")
+                st.sidebar.success(f"✅ Sincronizzati {len(titoli_aggiornati)}/{len(TITOLI_VALIDI)} titoli!")
                 st.cache_data.clear()
                 st.rerun()
             else:
-                st.sidebar.error("❌ Nessun prezzo valido trovato su Yahoo Finance in questo momento.")
+                st.sidebar.error("❌ Impossibile scaricare prezzi. Possibili cause:\n- Yahoo Finance offline\n- Rate limit raggiunto\n- Problema connessione\n\nRiprova tra 5 minuti.")
+                logger.error(f"Nessun prezzo scaricato. Errori: {errori}")
 
     st.sidebar.divider()
     st.sidebar.subheader("🛒 Registra Acquisto")
