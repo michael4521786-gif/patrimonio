@@ -1,7 +1,11 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import yfinance as yf
+import requests
+import firebase_admin
+from firebase_admin import credentials, firestore
+import os
+import bcrypt
 import logging
 import db
 
@@ -107,6 +111,29 @@ def format_ita(valore, decimali=2):
     str_val = f"{int(valore):,}" if decimali == 0 else f"{float(valore):,.{decimali}f}"
     return str_val.replace(',', 'X').replace('.', ',').replace('X', '.')
 
+# --- NUOVO DOWNLOADER PREZZI DIRETTO ---
+def scarica_prezzi_diretti(tickers_map):
+    nuovi_prezzi = {}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    for nome, ticker in tickers_map.items():
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1d&interval=1d"
+        try:
+            response = requests.get(url, headers=headers, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                # Naviga nel JSON per trovare l'ultimo prezzo di mercato regolare
+                prezzo = data['chart']['result'][0]['meta']['regularMarketPrice']
+                nuovi_prezzi[nome] = round(float(prezzo), 2)
+            else:
+                logger.warning(f"Errore API Yahoo per {nome}: Status {response.status_code}")
+        except Exception as e:
+            logger.error(f"Eccezione durante il fetch di {nome}: {e}")
+            
+    return nuovi_prezzi
+
 # --- SIDEBAR CON SCUDO ARALDICO ---
 st.sidebar.title(f"Ciao {st.session_state['nome_portafoglio']}")
 
@@ -140,33 +167,26 @@ st.sidebar.divider()
 if st.session_state["ruolo"] == "admin":
     st.sidebar.subheader("🌐 Sincronizzazione Borsa")
     if st.sidebar.button("📥 Scarica Prezzi in Tempo Reale"):
-        with st.spinner("Scaricamento dati in batch da Yahoo Finance..."):
+        with st.spinner("Scaricamento dati in Diretta da Yahoo Finance..."):
             tickers_map = {nome: get_ticker_yahoo(nome) for nome in dati["prezzi_attuali"].keys()}
-            tickers_list = list(tickers_map.values())
             
-            if tickers_list:
+            if tickers_map:
                 try:
-                    storico = yf.download(tickers_list, period="1d", progress=False)
-                    if not storico.empty and 'Close' in storico:
-                        close_data = storico['Close']
-                        for nome, ticker in tickers_map.items():
-                            try:
-                                if len(tickers_list) == 1:
-                                    prezzo = float(close_data.iloc[-1])
-                                else:
-                                    prezzo = float(close_data[ticker].iloc[-1])
-                                    
-                                if not pd.isna(prezzo):
-                                    dati["prezzi_attuali"][nome] = round(prezzo, 2)
-                            except Exception as e:
-                                logger.warning(f"Prezzo non trovato per {nome}: {e}")
+                    # Chiamata al nuovo downloader diretto
+                    nuovi_prezzi = scarica_prezzi_diretti(tickers_map)
+                    
+                    if nuovi_prezzi:
+                        for nome, prezzo in nuovi_prezzi.items():
+                            dati["prezzi_attuali"][nome] = prezzo
                                 
-                    db.salva_mercato(dati["prezzi_attuali"], dati["dividendi_annui"])
-                    st.sidebar.success("Prezzi sincronizzati in batch!")
-                    st.cache_data.clear()
-                    st.rerun()
+                        db.salva_mercato(dati["prezzi_attuali"], dati["dividendi_annui"])
+                        st.sidebar.success("Prezzi in Diretta aggiornati! ⚡")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.sidebar.error("Nessun prezzo trovato nell'API.")
                 except Exception as e:
-                    logger.error(f"Errore download batch Yahoo Finance: {e}")
+                    logger.error(f"Errore generale Sincronizzazione: {e}")
                     st.sidebar.error("Errore di connessione a Yahoo Finance.")
 
     st.sidebar.divider()
