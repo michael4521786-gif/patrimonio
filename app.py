@@ -106,7 +106,7 @@ dati = carica_dati_autorizzati_cached(st.session_state["utente"], st.session_sta
 # --- FUNZIONI DI SUPPORTO ---
 def get_ticker_yahoo(nome_titolo):
     mappa_fissa = {"ENI": "ENI.MI", "LEONARDO": "LDO.MI", "FERRAGAMO": "SFER.MI"}
-    return mappa_fissa.get(nome_titolo, f"{nome_titolo}.MI" if "." not in nome_titolo else nome_titolo)
+    return mappa_fissa.get(nome_titolo.upper().strip(), f"{nome_titolo}.MI" if "." not in nome_titolo else nome_titolo)
 
 def format_ita(valore, decimali=2):
     str_val = f"{int(valore):,}" if decimali == 0 else f"{float(valore):,.{decimali}f}"
@@ -191,7 +191,7 @@ if st.session_state["ruolo"] == "admin":
                 prezzo = scarica_prezzo_yahoo_diretto(ticker)
                 
                 if prezzo is not None and prezzo > 0:
-                    prezzi_aggiornati[nome_titolo] = prezzo
+                    prezzi_aggiornati[nome_titolo.upper().strip()] = prezzo
                     titoli_aggiornati.append(nome_titolo)
                     st.sidebar.success(f"✅ {nome_titolo}: €{prezzo:.2f}")
                 else:
@@ -221,9 +221,9 @@ if st.session_state["ruolo"] == "admin":
         if submit_acquisto and titolo_acquisto:
             user_id = ID_UTENTI.get(membro_acquisto)
             if user_id:
-                nuovo_lotto = {"titolo": titolo_acquisto, "quantita": qta_acquisto, "prezzo_carico": prezzo_acquisto}
+                nuovo_lotto = {"titolo": titolo_acquisto.upper().strip(), "quantita": qta_acquisto, "prezzo_carico": prezzo_acquisto}
                 try:
-                    db.registra_acquisto(user_id, nuovo_lotto, titolo_acquisto, prezzo_acquisto)
+                    db.registra_acquisto(user_id, nuovo_lotto, titolo_acquisto.upper().strip(), prezzo_acquisto)
                     st.success("Acquisto registrato con successo! ✅")
                     st.cache_data.clear()
                     st.rerun()
@@ -266,7 +266,7 @@ dati_grafico_distribuzione = []
 
 for membro, lotti in dati["portafoglio"].items():
     for lotto in lotti:
-        titolo = lotto["titolo"]
+        titolo = lotto["titolo"].upper().strip()  # Normalizzazione maiuscola
         quantita = lotto["quantita"]
         prezzo_carico = lotto["prezzo_carico"]
         prezzo_attuale = dati["prezzi_attuali"].get(titolo, lotto["prezzo_carico"])
@@ -352,7 +352,7 @@ for i, membro in enumerate(membri_da_mostrare):
         tot_azioni = tot_membro_inv = tot_membro_att = tot_plus_netta = tot_div_annuo = tot_div_trimestrale = 0
         
         for lotto in lotti:
-            titolo = lotto["titolo"]
+            titolo = lotto["titolo"].upper().strip()  # Normalizzazione maiuscola
             q = lotto["quantita"]
             pc = lotto["prezzo_carico"]
             pa = dati["prezzi_attuali"].get(titolo, lotto["prezzo_carico"])
@@ -363,7 +363,7 @@ for i, membro in enumerate(membri_da_mostrare):
             plus_netta = plus * (1 - ALIQUOTE_TASSE["plusvalenza"]) if plus > 0 else plus
             div_annuo_netto = (q * dati["dividendi_annui"].get(titolo, 0)) * (1 - ALIQUOTE_TASSE["dividendi"])
             
-            valore_trimestrale = div_annuo_netto / 4 if titolo.upper().strip() == "ENI" else 0
+            valore_trimestrale = div_annuo_netto / 4 if titolo == "ENI" else 0
             str_trimestrale = f"{format_ita(valore_trimestrale, 2)} €" if valore_trimestrale > 0 else "-"
             
             segno = "+" if plus_netta > 0 else ""
@@ -376,11 +376,16 @@ for i, membro in enumerate(membri_da_mostrare):
             tot_div_trimestrale += valore_trimestrale
             
             righe.append({
-                "Logo": LOGHI_AZIENDE.get(titolo.upper().strip(), ""),
-                "Titolo": titolo, "Azioni": format_ita(q, 0), "Prezzo Carico (€)": format_ita(pc, 3),
-                "Prezzo Mercato (€)": format_ita(pa, 2), "Investito (€)": format_ita(inv, 2),
-                "Valore Attuale (€)": format_ita(att, 2), "Plus/Minus Netta (€)": f"{segno}{format_ita(plus_netta, 2)}",
-                "Div. Annuo Netto": f"{format_ita(div_annuo_netto, 2)} €", "Div. Trimestrale Netto": str_trimestrale
+                "Logo": LOGHI_AZIENDE.get(titolo, ""),
+                "Titolo": titolo.capitalize(), 
+                "Azioni": format_ita(q, 0), 
+                "Prezzo Carico (€)": format_ita(pc, 3),
+                "Prezzo Mercato (€)": format_ita(pa, 2), 
+                "Investito (€)": format_ita(inv, 2),
+                "Valore Attuale (€)": format_ita(att, 2), 
+                "Plus/Minus Netta (€)": f"{segno}{format_ita(plus_netta, 2)}",
+                "Div. Annuo Netto": f"{format_ita(div_annuo_netto, 2)} €", 
+                "Div. Trimestrale Netto": str_trimestrale
             })
         
         segno_tot = "+" if tot_plus_netta > 0 else ""
