@@ -46,6 +46,9 @@ def setup_iniziale_db():
             "portafoglio": vecchi_dati.get("portafoglio", {}).get(info["nome_portafoglio"], [])
         })
 
+# ⬅️ ESECUZIONE SINGOLA: Python legge questa riga solo al primo avvio del server!
+setup_iniziale_db()
+
 # --- AUTENTICAZIONE ---
 def verifica_credenziali(user_input, psw_input):
     doc = db_client.collection("utenti").document(user_input).get()
