@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import requests
+from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import credentials, firestore
 import os
@@ -79,7 +80,7 @@ def esegui_logout():
     st.session_state["ruolo"] = None
     st.session_state["nome_portafoglio"] = None
 
-# --- SCHERMATA DI LOGIN BLOCCANTE ---
+# --- SCHERMATA DI LOGIN BLOCCANTE (STILE WORDPRESS) ---
 if not st.session_state["utente"]:
     st.markdown("<br><br><br>", unsafe_allow_html=True)
     col_spacer_sx, col_centro, col_spacer_dx = st.columns([1, 1.2, 1])
@@ -95,7 +96,7 @@ if not st.session_state["utente"]:
             
     st.stop()
 
-# --- RECUPERO DATI AUTORIZZATI ---
+# --- RECUPERO DATI AUTORIZZATI (CON CACHE) ---
 @st.cache_data(ttl=60)
 def carica_dati_autorizzati_cached(utente, ruolo):
     return db.carica_dati_autorizzati(utente, ruolo)
@@ -103,51 +104,51 @@ def carica_dati_autorizzati_cached(utente, ruolo):
 dati = carica_dati_autorizzati_cached(st.session_state["utente"], st.session_state["ruolo"])
 
 # --- FUNZIONI DI SUPPORTO ---
-def get_ticker_yahoo(nome_titolo):
-    mappa_fissa = {"ENI": "ENI.MI", "LEONARDO": "LDO.MI", "FERRAGAMO": "SFER.MI"}
-    return mappa_fissa.get(nome_titolo, f"{nome_titolo}.MI" if "." not in nome_titolo else nome_titolo)
+def get_ticker_google(nome_titolo):
+    # I Ticker su Google Finance per la borsa di Milano terminano con ":BIT"
+    mappa_fissa = {"ENI": "ENI:BIT", "LEONARDO": "LDO:BIT", "FERRAGAMO": "SFER:BIT"}
+    return mappa_fissa.get(nome_titolo, f"{nome_titolo}:BIT" if ":" not in nome_titolo else nome_titolo)
 
 def format_ita(valore, decimali=2):
     str_val = f"{int(valore):,}" if decimali == 0 else f"{float(valore):,.{decimali}f}"
     return str_val.replace(',', 'X').replace('.', ',').replace('X', '.')
 
-# --- DOWNLOADER PREZZI ROBUSTO (MULTI-ENDPOINT) ---
-def scarica_prezzi_diretti(tickers_map):
+# --- MOTORE DI RICERCA PREZZI SU GOOGLE FINANCE ---
+def scarica_prezzi_google(tickers_map):
     nuovi_prezzi = {}
     
-    # Imitiamo un browser reale in modo aggressivo per bypassare i blocchi
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9,it;q=0.8',
+        'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
     }
     
-    # Proviamo diversi endpoint di Yahoo se uno fallisce
-    endpoints = [
-        "https://query2.finance.yahoo.com/v8/finance/chart/{}",
-        "https://query1.finance.yahoo.com/v8/finance/chart/{}"
-    ]
-    
     for nome, ticker in tickers_map.items():
-        prezzo_trovato = False
-        
-        for base_url in endpoints:
-            if prezzo_trovato: break
+        url = f"https://www.google.com/finance/quote/{ticker}"
+        try:
+            response = requests.get(url, headers=headers, timeout=5)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                # Cerca il blocco HTML che contiene il prezzo gigante
+                prezzo_div = soup.find('div', class_='YMlKec fxKbKc')
                 
-            url = base_url.format(ticker) + "?range=1d&interval=1d"
-            try:
-                response = requests.get(url, headers=headers, timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'chart' in data and 'result' in data['chart'] and data['chart']['result']:
-                        prezzo = data['chart']['result'][0]['meta']['regularMarketPrice']
-                        nuovi_prezzi[nome] = round(float(prezzo), 2)
-                        prezzo_trovato = True
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Timeout o errore di connessione per {nome} sull'endpoint {base_url}: {e}")
-            except Exception as e:
-                logger.error(f"Errore di parsing per {nome}: {e}")
-                
+                if prezzo_div:
+                    # Estrae il testo, toglie il simbolo dell'Euro e pulisce gli spazi
+                    prezzo_testo = prezzo_div.text.replace('€', '').replace(' ', '').strip()
+                    
+                    # Convertiamo la punteggiatura italiana in inglese per Python
+                    if ',' in prezzo_testo and '.' in prezzo_testo:
+                        prezzo_testo = prezzo_testo.replace('.', '').replace(',', '.')
+                    elif ',' in prezzo_testo:
+                        prezzo_testo = prezzo_testo.replace(',', '.')
+                        
+                    nuovi_prezzi[nome] = round(float(prezzo_testo), 2)
+                else:
+                    logger.warning(f"Il prezzo di {nome} non è stato trovato nella pagina di Google.")
+            else:
+                logger.warning(f"Google ha rifiutato la connessione per {nome} (Status {response.status_code})")
+        except Exception as e:
+            logger.error(f"Errore nello scraping di {nome} ({ticker}): {e}")
+            
     return nuovi_prezzi
 
 # --- SIDEBAR CON SCUDO ARALDICO ---
@@ -183,12 +184,13 @@ st.sidebar.divider()
 if st.session_state["ruolo"] == "admin":
     st.sidebar.subheader("🌐 Sincronizzazione Borsa")
     if st.sidebar.button("📥 Scarica Prezzi in Tempo Reale"):
-        with st.spinner("Scaricamento dati in Diretta da Yahoo Finance..."):
-            tickers_map = {nome: get_ticker_yahoo(nome) for nome in dati["prezzi_attuali"].keys()}
+        with st.spinner("Scaricamento dati in Diretta da Google Finance..."):
+            tickers_map = {nome: get_ticker_google(nome) for nome in dati["prezzi_attuali"].keys()}
             
             if tickers_map:
                 try:
-                    nuovi_prezzi = scarica_prezzi_diretti(tickers_map)
+                    # Usiamo il nostro nuovo motore di ricerca Google
+                    nuovi_prezzi = scarica_prezzi_google(tickers_map)
                     
                     if nuovi_prezzi:
                         for nome, prezzo in nuovi_prezzi.items():
@@ -196,16 +198,15 @@ if st.session_state["ruolo"] == "admin":
                                 
                         db.salva_mercato(dati["prezzi_attuali"], dati["dividendi_annui"])
                         
-                        # Mostra quanti titoli sono stati aggiornati
                         titoli_aggiornati = list(nuovi_prezzi.keys())
-                        st.sidebar.success(f"Aggiornati: {', '.join(titoli_aggiornati)} ⚡")
+                        st.sidebar.success(f"Aggiornati da Google: {', '.join(titoli_aggiornati)} ⚡")
                         st.cache_data.clear()
                         st.rerun()
                     else:
-                        st.sidebar.error("Impossibile contattare i server di borsa. Riprova tra poco.")
+                        st.sidebar.error("Impossibile leggere i prezzi da Google in questo momento.")
                 except Exception as e:
-                    logger.error(f"Errore generale Sincronizzazione: {e}")
-                    st.sidebar.error("Errore irreversibile di connessione.")
+                    logger.error(f"Errore Sincronizzazione Google: {e}")
+                    st.sidebar.error("Errore di connessione a Google.")
 
     st.sidebar.divider()
     st.sidebar.subheader("🛒 Registra Acquisto")
