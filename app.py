@@ -113,19 +113,13 @@ def format_ita(valore, decimali=2):
     return str_val.replace(',', 'X').replace('.', ',').replace('X', '.')
 
 def scarica_prezzo_yahoo_diretto(ticker):
-    """
-    Scarica il prezzo direttamente dalle API di Yahoo Finance usando una sessione HTTP 
-    con cookie di autenticazione simulati per evitare blocchi cloud.
-    """
     session = requests.Session()
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     })
     
     try:
-        # Inizializza la sessione su Yahoo per acquisire i cookie necessari
         session.get("https://finance.yahoo.com", timeout=5)
-        
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=5d&interval=1d"
         response = session.get(url, timeout=5)
         
@@ -134,10 +128,8 @@ def scarica_prezzo_yahoo_diretto(ticker):
             result = data.get('chart', {}).get('result')
             if result:
                 meta = result[0].get('meta', {})
-                # Legge il prezzo di mercato corrente
                 prezzo = meta.get('regularMarketPrice')
                 
-                # Se non c'è il live, prende l'ultimo prezzo di chiusura valido dallo storico
                 if not prezzo:
                     indicators = result[0].get('indicators', {}).get('quote', [{}])[0]
                     closes = indicators.get('close', [])
@@ -157,7 +149,8 @@ def scarica_prezzo_yahoo_diretto(ticker):
 # --- SIDEBAR CON SCUDO ARALDICO ---
 st.sidebar.title(f"Ciao {st.session_state['nome_portafoglio']}")
 
-iniziale = st.sidebar.nome_portafoglio[0].upper() if hasattr(st.sidebar, 'nome_portafoglio') else st.session_state['nome_portafoglio'][0].upper()
+# CORRETTO: Prende l'iniziale correttamente dalla sessione
+iniziale = st.session_state['nome_portafoglio'][0].upper()
 st.sidebar.markdown(f"""
     <div style="
         width: 90px; 
