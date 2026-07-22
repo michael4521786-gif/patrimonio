@@ -2,17 +2,14 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import yfinance as yf
-import firebase_admin
-from firebase_admin import credentials, firestore
-import os
-import bcrypt
 import logging
+import db  # ⬅️ IMPORTIAMO IL NOSTRO NUOVO MOTORE DATABASE!
 
 # --- CONFIGURAZIONE LOGGING ---
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# --- CONFIGURAZIONE PAGINA E INIEZIONE CSS ADATTIVO (CHIARO/SCURO) ---
+# --- CONFIGURAZIONE PAGINA E INIEZIONE CSS ---
 st.set_page_config(page_title="Wealth Management", page_icon="🏦", layout="wide")
 
 st.markdown("""
@@ -57,68 +54,24 @@ if "utente" not in st.session_state:
     st.session_state["ruolo"] = None
     st.session_state["nome_portafoglio"] = None
 
-# --- CONNESSIONE FIREBASE ---
-if not firebase_admin._apps:
-    cert_dict = dict(st.secrets["firebase"])
-    cert_dict["private_key"] = cert_dict["private_key"].replace('\\n', '\n')
-    cred = credentials.Certificate(cert_dict)
-    firebase_admin.initialize_app(cred)
-
-db = firestore.client()
-
-# --- MIGRAZIONE E SETUP INIZIALE AUTOMATICO ---
-def setup_iniziale_db():
-    if db.collection("utenti").document("enzo").get().exists:
-        return
-
-    vecchio_doc = db.collection("patrimonio_famiglia").document("dati_principali").get()
-    vecchi_dati = vecchio_doc.to_dict() if vecchio_doc.exists else {"portafoglio": {}, "prezzi_attuali": {}, "dividendi_annui": {}}
-
-    db.collection("mercato").document("prezzi_e_dividendi").set({
-        "prezzi_attuali": vecchi_dati.get("prezzi_attuali", {}),
-        "dividendi_annui": vecchi_dati.get("dividendi_annui", {})
-    })
-
-    mappa_setup = {
-        "enzo": {"ruolo": "admin", "nome_portafoglio": "Enzo"},
-        "stefania": {"ruolo": "user", "nome_portafoglio": "Stefania"},
-        "mamma": {"ruolo": "user", "nome_portafoglio": "Mamma"},
-        "claudia": {"ruolo": "user", "nome_portafoglio": "Claudia"}
-    }
-    
-    for user_id, info in mappa_setup.items():
-        psw_chiara = st.secrets["passwords"].get(user_id, "1234")
-        salt = bcrypt.gensalt()
-        psw_hash = bcrypt.hashpw(psw_chiara.encode('utf-8'), salt).decode('utf-8')
-        
-        db.collection("utenti").document(user_id).set({
-            "password_hash": psw_hash,
-            "ruolo": info["ruolo"],
-            "nome_portafoglio": info["nome_portafoglio"],
-            "portafoglio": vecchi_dati.get("portafoglio", {}).get(info["nome_portafoglio"], [])
-        })
-
-setup_iniziale_db()
+# Avvia il check iniziale del database
+db.setup_iniziale_db()
 
 # --- LOGICA DI LOGIN ---
 def esegui_login():
     user_input = st.session_state.user_input.lower()
-    psw_input = st.session_state.psw_input.encode('utf-8')
+    psw_input = st.session_state.psw_input
     
-    doc = db.collection("utenti").document(user_input).get()
-    if doc.exists:
-        dati_utente = doc.to_dict()
-        hash_salvato = dati_utente.get("password_hash", "").encode('utf-8')
-        
-        if bcrypt.checkpw(psw_input, hash_salvato):
-            st.session_state["utente"] = user_input
-            st.session_state["ruolo"] = dati_utente["ruolo"]
-            st.session_state["nome_portafoglio"] = dati_utente["nome_portafoglio"]
-            logger.info(f"Login effettuato con successo: {user_input}")
-            return
-            
-    logger.warning(f"Tentativo di login fallito per utente: {user_input}")
-    st.error("Credenziali errate o utente inesistente.")
+    successo, dati_utente = db.verifica_credenziali(user_input, psw_input)
+    
+    if successo:
+        st.session_state["utente"] = user_input
+        st.session_state["ruolo"] = dati_utente["ruolo"]
+        st.session_state["nome_portafoglio"] = dati_utente["nome_portafoglio"]
+        logger.info(f"Login effettuato con successo: {user_input}")
+    else:
+        logger.warning(f"Tentativo di login fallito per utente: {user_input}")
+        st.error("Credenziali errate o utente inesistente.")
 
 def esegui_logout():
     st.session_state["utente"] = None
@@ -128,7 +81,6 @@ def esegui_logout():
 # --- SCHERMATA DI LOGIN BLOCCANTE (STILE WORDPRESS) ---
 if not st.session_state["utente"]:
     st.markdown("<br><br><br>", unsafe_allow_html=True)
-    
     col_spacer_sx, col_centro, col_spacer_dx = st.columns([1, 1.2, 1])
     
     with col_centro:
@@ -142,80 +94,14 @@ if not st.session_state["utente"]:
             
     st.stop()
 
-# --- RECUPERO DATI AUTORIZZATI (CON CACHE OTTIMIZZATA) ---
-def carica_dati_autorizzati(utente, ruolo):
-    dati = {"portafoglio": {}, "prezzi_attuali": {}, "dividendi_annui": {}}
-    
-    doc_mercato = db.collection("mercato").document("prezzi_e_dividendi").get()
-    if doc_mercato.exists:
-        mercato = doc_mercato.to_dict()
-        dati["prezzi_attuali"] = mercato.get("prezzi_attuali", {})
-        dati["dividendi_annui"] = mercato.get("dividendi_annui", {})
-        
-    if ruolo == "admin":
-        utenti_docs = db.collection("utenti").stream()
-        for u in utenti_docs:
-            u_data = u.to_dict()
-            nome_port = u_data.get("nome_portafoglio")
-            dati["portafoglio"][nome_port] = u_data.get("portafoglio", [])
-    else:
-        doc_utente = db.collection("utenti").document(utente).get()
-        if doc_utente.exists:
-            u_data = doc_utente.to_dict()
-            nome_port = u_data.get("nome_portafoglio")
-            dati["portafoglio"][nome_port] = u_data.get("portafoglio", [])
-            
-    return dati
-
+# --- RECUPERO DATI AUTORIZZATI (CON CACHE) ---
 @st.cache_data(ttl=60)
 def carica_dati_autorizzati_cached(utente, ruolo):
-    return carica_dati_autorizzati(utente, ruolo)
+    return db.carica_dati_autorizzati(utente, ruolo)
 
 dati = carica_dati_autorizzati_cached(st.session_state["utente"], st.session_state["ruolo"])
 
-# --- LOGICA TRANSAZIONALE ATOMIC (ACID) ---
-@firestore.transactional
-def transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titolo, prezzo):
-    user_snap = user_ref.get(transaction=transaction)
-    mercato_snap = mercato_ref.get(transaction=transaction)
-    
-    user_dati = user_snap.to_dict() or {}
-    portafoglio = user_dati.get("portafoglio", [])
-    mercato_dati = mercato_snap.to_dict() if mercato_snap.exists else {"prezzi_attuali": {}, "dividendi_annui": {}}
-    
-    portafoglio.append(nuovo_lotto)
-    
-    aggiorna_merc = False
-    if titolo not in mercato_dati.get("prezzi_attuali", {}):
-        if "prezzi_attuali" not in mercato_dati: mercato_dati["prezzi_attuali"] = {}
-        if "dividendi_annui" not in mercato_dati: mercato_dati["dividendi_annui"] = {}
-        mercato_dati["prezzi_attuali"][titolo] = prezzo
-        mercato_dati["dividendi_annui"][titolo] = 0.0
-        aggiorna_merc = True
-        
-    transaction.update(user_ref, {"portafoglio": portafoglio})
-    if aggiorna_merc:
-        transaction.set(mercato_ref, mercato_dati, merge=True)
-    return True
-
-@firestore.transactional
-def transazione_vendita(transaction, user_ref, indice):
-    user_snap = user_ref.get(transaction=transaction)
-    user_dati = user_snap.to_dict() or {}
-    portafoglio = user_dati.get("portafoglio", [])
-    
-    if 0 <= indice < len(portafoglio):
-        portafoglio.pop(indice)
-        transaction.update(user_ref, {"portafoglio": portafoglio})
-        return True
-    return False
-
-def salva_mercato(prezzi, dividendi):
-    db.collection("mercato").document("prezzi_e_dividendi").set({
-        "prezzi_attuali": prezzi,
-        "dividendi_annui": dividendi
-    })
-
+# --- FUNZIONI DI SUPPORTO ---
 def get_ticker_yahoo(nome_titolo):
     mappa_fissa = {"ENI": "ENI.MI", "LEONARDO": "LDO.MI", "FERRAGAMO": "SFER.MI"}
     return mappa_fissa.get(nome_titolo, f"{nome_titolo}.MI" if "." not in nome_titolo else nome_titolo)
@@ -263,13 +149,11 @@ if st.session_state["ruolo"] == "admin":
             
             if tickers_list:
                 try:
-                    # Chiamata in BATCH singola per tutti i titoli
                     storico = yf.download(tickers_list, period="1d", progress=False)
                     if not storico.empty and 'Close' in storico:
                         close_data = storico['Close']
                         for nome, ticker in tickers_map.items():
                             try:
-                                # Gestione output (DataFrame se >1 titolo, Series se 1 solo)
                                 if len(tickers_list) == 1:
                                     prezzo = float(close_data.iloc[-1])
                                 else:
@@ -278,11 +162,11 @@ if st.session_state["ruolo"] == "admin":
                                 if not pd.isna(prezzo):
                                     dati["prezzi_attuali"][nome] = round(prezzo, 2)
                             except Exception as e:
-                                logger.warning(f"Prezzo non trovato o parsing fallito per {nome}: {e}")
+                                logger.warning(f"Prezzo non trovato per {nome}: {e}")
                                 
-                    salva_mercato(dati["prezzi_attuali"], dati["dividendi_annui"])
+                    db.salva_mercato(dati["prezzi_attuali"], dati["dividendi_annui"])
                     st.sidebar.success("Prezzi sincronizzati in batch!")
-                    st.cache_data.clear() # Svuota la cache per mostrare i nuovi dati
+                    st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
                     logger.error(f"Errore download batch Yahoo Finance: {e}")
@@ -300,15 +184,11 @@ if st.session_state["ruolo"] == "admin":
         if submit_acquisto and titolo_acquisto:
             user_id = ID_UTENTI.get(membro_acquisto)
             if user_id:
-                user_ref = db.collection("utenti").document(user_id)
-                mercato_ref = db.collection("mercato").document("prezzi_e_dividendi")
                 nuovo_lotto = {"titolo": titolo_acquisto, "quantita": qta_acquisto, "prezzo_carico": prezzo_acquisto}
-                
-                transaction = db.transaction()
                 try:
-                    transazione_acquisto(transaction, user_ref, mercato_ref, nuovo_lotto, titolo_acquisto, prezzo_acquisto)
+                    db.registra_acquisto(user_id, nuovo_lotto, titolo_acquisto, prezzo_acquisto)
                     st.success("Acquisto registrato con successo! ✅")
-                    st.cache_data.clear() # Invalida la cache
+                    st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
                     logger.error(f"Transazione acquisto fallita: {e}")
@@ -326,15 +206,12 @@ if st.session_state["ruolo"] == "admin":
             if st.sidebar.button("Conferma Vendita (Elimina)"):
                 indice = int(lotto_scelto.split(" - ")[0])
                 user_id = ID_UTENTI.get(membro_vendita)
-                
                 if user_id:
-                    user_ref = db.collection("utenti").document(user_id)
-                    transaction = db.transaction()
                     try:
-                        success = transazione_vendita(transaction, user_ref, indice)
+                        success = db.registra_vendita(user_id, indice)
                         if success:
                             st.success("Vendita completata! ✅")
-                            st.cache_data.clear() # Invalida la cache
+                            st.cache_data.clear()
                             st.rerun()
                         else:
                             st.error("Errore: Impossibile trovare il lotto.")
