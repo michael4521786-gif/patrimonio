@@ -1,6 +1,6 @@
-streamlit
-pandas
-plotly
-yfinance
-firebase-admin
-bcrypt
+streamlit==1.36.0
+pandas==2.2.2
+plotly==5.22.0
+yfinance==0.2.40
+firebase-admin==6.5.0
+bcrypt==4.1.3
