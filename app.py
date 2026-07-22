@@ -288,7 +288,7 @@ if st.session_state["ruolo"] == "admin":
     tabs = st.tabs(membri_da_mostrare)
 else:
     if st.session_state["utente"] in ["stefania", "claudia"]:
-        st.subheader("I Tuoi Titoli [Nota: l'investimento iniziale è già al netto della Tobin Tax dello 0,20%]")
+        st.markdown("### I Tuoi Titoli <span style='font-size: 16px; font-weight: 400; color: gray;'>[Nota: l'investimento iniziale è già al netto della Tobin Tax dello 0,20%]</span>", unsafe_allow_html=True)
     else:
         st.subheader("I Tuoi Titoli")
         
