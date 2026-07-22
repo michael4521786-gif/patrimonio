@@ -61,7 +61,6 @@ if "utente" not in st.session_state:
 if "tentativi_falliti" not in st.session_state:
     st.session_state["tentativi_falliti"] = 0
 
-# --- LOGICA DI LOGIN CON RATE LIMITING (MAX 4 TENTATIVI) ---
 def esegui_login():
     if st.session_state["tentativi_falliti"] >= 4:
         st.error("🚫 Accesso temporaneamente bloccato per troppi tentativi falliti. Ricarica la pagina.")
@@ -73,56 +72,42 @@ def esegui_login():
     successo, dati_utente = db.verifica_credenziali(user_input, psw_input)
     
     if successo:
-        st.session_state["tentativi_falliti"] = 0  # Reset contatore al successo
+        st.session_state["tentativi_falliti"] = 0
         st.session_state["utente"] = user_input
         st.session_state["ruolo"] = dati_utente["ruolo"]
         st.session_state["nome_portafoglio"] = dati_utente["nome_portafoglio"]
-        logger.info(f"Login effettuato con successo: {user_input}")
     else:
         st.session_state["tentativi_falliti"] += 1
         rimanenti = max(0, 4 - st.session_state["tentativi_falliti"])
-        logger.warning(f"Tentativo di login fallito per utente: {user_input}. Rimasti: {rimanenti}")
-        
         if rimanenti == 0:
             st.error("🚫 Troppi tentativi falliti. Accesso bloccato.")
         else:
-            st.error(f"Credenziali errate. Tentativi rimanenti prima del blocco: {rimanenti}")
+            st.error(f"Credenziali errate. Tentativi rimanenti: {rimanenti}")
 
 def esegui_logout():
     st.session_state["utente"] = None
     st.session_state["ruolo"] = None
     st.session_state["nome_portafoglio"] = None
 
-# --- SCHERMATA DI LOGIN BLOCCANTE ---
 if not st.session_state["utente"]:
     st.markdown("<br><br><br>", unsafe_allow_html=True)
     col_spacer_sx, col_centro, col_spacer_dx = st.columns([1, 1.2, 1])
-    
     with col_centro:
         st.markdown("<div style='text-align: center; font-size: 70px; color: #3B82F6;'>🏦</div>", unsafe_allow_html=True)
         st.markdown("<h3 style='text-align: center; margin-bottom: 25px; font-family: sans-serif;'>Gestione Patrimonio</h3>", unsafe_allow_html=True)
-        
         with st.form("login_form", clear_on_submit=False):
             st.text_input("Nome utente", key="user_input")
             st.text_input("Password", type="password", key="psw_input")
             st.form_submit_button("Login", on_click=esegui_login, type="primary", use_container_width=True)
-            
     st.stop()
 
-# --- RECUPERO DATI AUTORIZZATI ---
 @st.cache_data(ttl=60)
 def carica_dati_autorizzati_cached(utente, ruolo):
     return db.carica_dati_autorizzati(utente, ruolo)
 
 dati = carica_dati_autorizzati_cached(st.session_state["utente"], st.session_state["ruolo"])
 
-# --- FUNZIONI DI SUPPORTO E TICKER DINAMICI ---
 def get_ticker_yahoo(nome_titolo):
-    """
-    Gestisce ticker dinamici: se è un titolo noto italiano usa il suffisso .MI,
-    altrimenti se l'utente digita un ticker con punto (es. AAPL o ENI.MI) lo usa direttamente,
-    altrimenti aggiunge .MI di default per la borsa italiana.
-    """
     nome = nome_titolo.upper().strip()
     mappa_fissa = {"ENI": "ENI.MI", "LEONARDO": "LDO.MI", "FERRAGAMO": "SFER.MI"}
     if nome in mappa_fissa:
@@ -138,55 +123,39 @@ def scarica_prezzo_yahoo_diretto(ticker):
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     })
-    
     try:
         session.get("https://finance.yahoo.com", timeout=5)
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=5d&interval=1d"
         response = session.get(url, timeout=5)
-        
         if response.status_code == 200:
             data = response.json()
             result = data.get('chart', {}).get('result')
             if result:
                 meta = result[0].get('meta', {})
                 prezzo = meta.get('regularMarketPrice')
-                
                 if not prezzo:
                     indicators = result[0].get('indicators', {}).get('quote', [{}])[0]
                     closes = indicators.get('close', [])
                     valid_closes = [c for c in closes if c is not None]
                     if valid_closes:
                         prezzo = valid_closes[-1]
-                        
                 if prezzo and float(prezzo) > 0:
                     return round(float(prezzo), 2)
-                    
-        logger.warning(f"Impossibile estrarre il prezzo per {ticker} da Yahoo Finance.")
     except Exception as e:
-        logger.error(f"Errore di connessione a Yahoo per {ticker}: {e}")
-        
+        logger.error(f"Errore connessione Yahoo per {ticker}: {e}")
     return None
 
-# --- SIDEBAR CON SCUDO ARALDICO ---
+# --- SIDEBAR ---
 st.sidebar.title(f"Ciao {st.session_state['nome_portafoglio']}")
-
 iniziale = st.session_state['nome_portafoglio'][0].upper()
 st.sidebar.markdown(f"""
     <div style="
-        width: 90px; 
-        height: 100px; 
-        border-radius: 12px 12px 45px 45px;
+        width: 90px; height: 100px; border-radius: 12px 12px 45px 45px;
         background: linear-gradient(135deg, #7A0016 0%, #3B0008 100%);
-        border: 4px solid #D4AF37;
-        color: #FDF5E6;
-        display: flex; 
-        align-items: center; 
-        justify-content: center; 
-        font-size: 55px; 
-        font-family: 'Times New Roman', Times, serif;
-        font-weight: bold;
-        margin-bottom: 20px;
-        box-shadow: 0 6px 12px rgba(0,0,0,0.5), inset 0 0 15px rgba(0,0,0,0.7);
+        border: 4px solid #D4AF37; color: #FDF5E6; display: flex; 
+        align-items: center; justify-content: center; font-size: 55px; 
+        font-family: 'Times New Roman', Times, serif; font-weight: bold;
+        margin-bottom: 20px; box-shadow: 0 6px 12px rgba(0,0,0,0.5), inset 0 0 15px rgba(0,0,0,0.7);
         text-shadow: 3px 3px 6px rgba(0,0,0,0.8);
     ">
         {iniziale}
@@ -196,16 +165,13 @@ st.sidebar.markdown(f"""
 st.sidebar.button("🚪 Esci (Logout)", on_click=esegui_logout)
 st.sidebar.divider()
 
-# --- FUNZIONI AMMINISTRATORE ---
 if st.session_state["ruolo"] == "admin":
     st.sidebar.subheader("🌐 Sincronizzazione Borsa")
     if st.sidebar.button("📥 Scarica Prezzi in Tempo Reale"):
-        with st.spinner("⏳ Scaricamento prezzi in tempo reale..."):
+        with st.spinner("⏳ Scaricamento prezzi..."):
             prezzi_aggiornati = {}
             titoli_aggiornati = []
-            errori = []
             
-            # Raccoglie dinamicamente TUTTI i titoli presenti nei portafogli e nel mercato
             titoli_da_aggiornare = set(dati["prezzi_attuali"].keys())
             for m_lotti in dati["portafoglio"].values():
                 for l in m_lotti:
@@ -214,18 +180,13 @@ if st.session_state["ruolo"] == "admin":
             
             for nome_titolo in titoli_da_aggiornare:
                 ticker = get_ticker_yahoo(nome_titolo)
-                logger.info(f"Scaricamento {nome_titolo} ({ticker})...")
-                
                 prezzo = scarica_prezzo_yahoo_diretto(ticker)
-                
                 if prezzo is not None and prezzo > 0:
                     prezzi_aggiornati[nome_titolo] = prezzo
                     titoli_aggiornati.append(nome_titolo)
                     st.sidebar.success(f"✅ {nome_titolo}: €{prezzo:.2f}")
                 else:
-                    errori.append(nome_titolo)
-                    st.sidebar.warning(f"⚠️ {nome_titolo}: prezzo non disponibile")
-                
+                    st.sidebar.warning(f"⚠️ {nome_titolo}: non disponibile")
                 time.sleep(0.5)
             
             if titoli_aggiornati:
@@ -234,15 +195,12 @@ if st.session_state["ruolo"] == "admin":
                 st.sidebar.success(f"✅ Sincronizzati {len(titoli_aggiornati)} titoli!")
                 st.cache_data.clear()
                 st.rerun()
-            else:
-                st.sidebar.error("❌ Impossibile scaricare i prezzi in questo momento.")
 
     st.sidebar.divider()
-    st.sidebar.subheader("🛒 Registra Acquisto (Multi-Titolo)")
+    st.sidebar.subheader("🛒 Registra Acquisto")
     with st.sidebar.form("form_acquisto"):
         membro_acquisto = st.selectbox("Chi acquista?", ORDINE_FAMIGLIA)
-        # Campo di testo libero per inserire qualsiasi titolo/ticker
-        titolo_acquisto = st.text_input("Nome Titolo o Ticker (es. ENI, AAPL, TESLA)").upper().strip()
+        titolo_acquisto = st.text_input("Nome Titolo o Ticker (es. ENI, AAPL)").upper().strip()
         qta_acquisto = st.number_input("Quantità", min_value=1, value=100, step=1)
         prezzo_acquisto = st.number_input("Prezzo di carico (€)", min_value=0.001, value=10.00, step=0.01, format="%.3f")
         submit_acquisto = st.form_submit_button("Conferma Acquisto")
@@ -253,12 +211,11 @@ if st.session_state["ruolo"] == "admin":
                 nuovo_lotto = {"titolo": titolo_acquisto, "quantita": qta_acquisto, "prezzo_carico": prezzo_acquisto}
                 try:
                     db.registra_acquisto(user_id, nuovo_lotto, titolo_acquisto, prezzo_acquisto)
-                    st.success("Acquisto registrato con successo! ✅")
+                    st.success("Acquisto registrato! ✅")
                     st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
-                    logger.error(f"Transazione acquisto fallita: {e}")
-                    st.error(f"Transazione fallita: {e}")
+                    st.error(f"Errore: {e}")
 
     st.sidebar.divider()
     st.sidebar.subheader("📉 Registra Vendita")
@@ -268,26 +225,19 @@ if st.session_state["ruolo"] == "admin":
         if lotti:
             opzioni_lotti = [f"{i} - {l['titolo']} ({l['quantita']} az. a {format_ita(l['prezzo_carico'], 3)}€)" for i, l in enumerate(lotti)]
             lotto_scelto = st.sidebar.selectbox("Seleziona lotto", opzioni_lotti, key="sel_lotto_vendita")
-            
             if st.sidebar.button("Conferma Vendita (Elimina)"):
                 indice = int(lotto_scelto.split(" - ")[0])
                 user_id = ID_UTENTI.get(membro_vendita)
                 if user_id:
                     try:
-                        success = db.registra_vendita(user_id, indice)
-                        if success:
-                            st.success("Vendita completata! ✅")
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error("Errore: Impossibile trovare il lotto.")
+                        db.registra_vendita(user_id, indice)
+                        st.success("Vendita completata! ✅")
+                        st.cache_data.clear()
+                        st.rerun()
                     except Exception as e:
-                        logger.error(f"Transazione vendita fallita: {e}")
-                        st.error(f"Transazione fallita: {e}")
-        else:
-            st.sidebar.info("Nessun titolo in portafoglio.")
+                        st.error(f"Errore: {e}")
 
-# --- LOGICA DI VISUALIZZAZIONE DATI ---
+# --- CALCOLI GLOBALI ---
 totale_investito = 0
 totale_attuale = 0
 dividendi_annui_lordi = 0
@@ -299,7 +249,7 @@ for membro, lotti in dati["portafoglio"].items():
         quantita = lotto["quantita"]
         prezzo_carico = lotto["prezzo_carico"]
         prezzo_attuale = dati["prezzi_attuali"].get(titolo, lotto["prezzo_carico"])
-        div_per_azione = dati["dividendi_annui"].get(titolo, 0)
+        div_per_azione = dati["dividendi_annui"].get(titolo, 0.0)
         
         investito = quantita * prezzo_carico
         attuale = quantita * prezzo_attuale
@@ -308,7 +258,6 @@ for membro, lotti in dati["portafoglio"].items():
         totale_investito += investito
         totale_attuale += attuale
         dividendi_annui_lordi += div_totale
-        
         dati_grafico_distribuzione.append({"Titolo": titolo, "Valore": attuale})
 
 plusvalenza_lorda = totale_attuale - totale_investito
@@ -316,8 +265,7 @@ plusvalenza_netta = plusvalenza_lorda * (1 - ALIQUOTE_TASSE["plusvalenza"]) if p
 dividendi_annui_netti = dividendi_annui_lordi * (1 - ALIQUOTE_TASSE["dividendi"])
 
 # --- DASHBOARD UI ---
-titolo_dash = "📊 Dashboard Patrimonio Familiare" if st.session_state["ruolo"] == "admin" else "📊 Il Tuo Portafoglio Personale"
-st.title(titolo_dash)
+st.title("📊 Dashboard Patrimonio Familiare" if st.session_state["ruolo"] == "admin" else "📊 Il Tuo Portafoglio Personale")
 
 col1, col2, col3, col4 = st.columns(4)
 segno_kpi = "+" if plusvalenza_netta > 0 else ""
@@ -360,7 +308,6 @@ else:
         st.markdown("### I Tuoi Titoli <span style='font-size: 16px; font-weight: 400; color: gray;'>[Nota: l'investimento iniziale è già al netto della Tobin Tax dello 0,20%]</span>", unsafe_allow_html=True)
     else:
         st.subheader("I Tuoi Titoli")
-        
     membri_da_mostrare = [st.session_state["nome_portafoglio"]]
     tabs = [st.container()]
 
@@ -385,15 +332,17 @@ for i, membro in enumerate(membri_da_mostrare):
             q = lotto["quantita"]
             pc = lotto["prezzo_carico"]
             pa = dati["prezzi_attuali"].get(titolo, lotto["prezzo_carico"])
+            div_unitario = dati["dividendi_annui"].get(titolo, 0.0)
             
             inv = q * pc
             att = q * pa
             plus = att - inv
             plus_netta = plus * (1 - ALIQUOTE_TASSE["plusvalenza"]) if plus > 0 else plus
-            div_annuo_netto = (q * dati["dividendi_annui"].get(titolo, 0)) * (1 - ALIQUOTE_TASSE["dividendi"])
+            div_annuo_netto = (q * div_unitario) * (1 - ALIQUOTE_TASSE["dividendi"])
             
             valore_trimestrale = div_annuo_netto / 4 if titolo == "ENI" else 0
             str_trimestrale = f"{format_ita(valore_trimestrale, 2)} €" if valore_trimestrale > 0 else "-"
+            str_div_unitario = f"{format_ita(div_unitario, 2)} €" if div_unitario > 0 else "-"
             
             segno = "+" if plus_netta > 0 else ""
             
@@ -413,6 +362,7 @@ for i, membro in enumerate(membri_da_mostrare):
                 "Investito (€)": format_ita(inv, 2),
                 "Valore Attuale (€)": format_ita(att, 2), 
                 "Plus/Minus Netta (€)": f"{segno}{format_ita(plus_netta, 2)}",
+                "Div. Azione (€)": str_div_unitario, # <-- NUOVA COLONNA DIVIDENDO UNITARIO
                 "Div. Annuo Netto": f"{format_ita(div_annuo_netto, 2)} €", 
                 "Div. Trimestrale Netto": str_trimestrale
             })
@@ -424,7 +374,7 @@ for i, membro in enumerate(membri_da_mostrare):
             "Logo": "", "Titolo": "TOTALE", "Azioni": format_ita(tot_azioni, 0), "Prezzo Carico (€)": "-",
             "Prezzo Mercato (€)": "-", "Investito (€)": format_ita(tot_membro_inv, 2),
             "Valore Attuale (€)": format_ita(tot_membro_att, 2), "Plus/Minus Netta (€)": f"{segno_tot}{format_ita(tot_plus_netta, 2)}",
-            "Div. Annuo Netto": f"{format_ita(tot_div_annuo, 2)} €", "Div. Trimestrale Netto": str_tot_trimestrale
+            "Div. Azione (€)": "-", "Div. Annuo Netto": f"{format_ita(tot_div_annuo, 2)} €", "Div. Trimestrale Netto": str_tot_trimestrale
         })
         
         df = pd.DataFrame(righe)
