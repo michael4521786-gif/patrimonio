@@ -85,7 +85,7 @@ if not st.session_state["utente"]:
         st.markdown("<h3 style='text-align: center; margin-bottom: 25px; font-family: sans-serif;'>Gestione Patrimonio</h3>", unsafe_allow_html=True)
         
         with st.form("login_form", clear_on_submit=False):
-            st.text_input("Nome utente o indirizzo email", key="user_input")
+            st.text_input("Nome utente", key="user_input")
             st.text_input("Password", type="password", key="psw_input")
             st.form_submit_button("Login", on_click=esegui_login, type="primary", use_container_width=True)
             
