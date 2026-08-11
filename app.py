@@ -10,6 +10,7 @@ import logging
 import db
 import time
 import datetime
+import urllib.parse
 
 # --- CONFIGURAZIONE LOGGING ---
 logger = logging.getLogger(__name__)
@@ -231,7 +232,6 @@ if st.session_state["ruolo"] == "admin":
         if submit_acquisto and titolo_acquisto:
             user_id = ID_UTENTI.get(membro_acquisto)
             if user_id:
-                # Formatta la data senza zeri iniziali (es. 1/8/2025)
                 data_str = f"{data_acquisto.day}/{data_acquisto.month}/{data_acquisto.year}"
                 nuovo_lotto = {
                     "titolo": titolo_acquisto, 
@@ -364,7 +364,6 @@ for i, membro in enumerate(membri_da_mostrare):
             pa = dati["prezzi_attuali"].get(titolo, lotto["prezzo_carico"])
             div_unitario = dati["dividendi_annui"].get(titolo, 0.0)
             
-            # Recupera la data formattata (es. 1/8/2025)
             data_lotto = get_lotto_data(membro, idx, lotto)
             prezzo_e_data = f"{format_ita(pc, 3)}\n({data_lotto})"
             
@@ -414,3 +413,23 @@ for i, membro in enumerate(membri_da_mostrare):
         df = pd.DataFrame(righe)
         styled_df = df.style.map(colora_valori, subset=['Plus/Minus Netta (€)'])
         st.dataframe(styled_df, use_container_width=True, hide_index=True, column_config={"Logo": st.column_config.ImageColumn("Logo", width="small")})
+
+        # --- PULSANTE WHATSAPP PER ENZO, STEFANIA E CLAUDIA ---
+        if st.session_state["ruolo"] == "admin" and membro in ["Enzo", "Stefania", "Claudia"]:
+            data_oggi = datetime.date.today().strftime('%d/%m/%Y')
+            testo_report = (
+                f"📊 Ciao {membro}, ecco il tuo report aggiornato al {data_oggi}!\n\n"
+                f"💰 Valore Attuale: {format_ita(tot_membro_att)} €\n"
+                f"📈 Plusvalenza Netta: {segno_tot}{format_ita(tot_plus_netta)} €\n"
+                f"💸 Dividendi Annui Netti: {format_ita(tot_div_annuo)} €"
+            )
+            testo_codificato = urllib.parse.quote(testo_report)
+            link_whatsapp = f"https://wa.me/?text={testo_codificato}"
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown(
+                f"<a href='{link_whatsapp}' target='_blank'>"
+                f"<button style='background-color:#25D366; color:white; border-radius:8px; padding:10px 15px; border:none; cursor:pointer; font-weight:bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>"
+                f"📲 Invia Report via WhatsApp</button></a>", 
+                unsafe_allow_html=True
+            )
