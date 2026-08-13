@@ -121,7 +121,6 @@ def format_ita(valore, decimali=2):
     return str_val.replace(',', 'X').replace('.', ',').replace('X', '.')
 
 def get_lotto_data(membro, indice, lotto):
-    """Restituisce la data d'acquisto formattata senza zeri iniziali (es. 1/8/2025)"""
     if "data" in lotto and lotto["data"]:
         return lotto["data"]
     
@@ -131,7 +130,6 @@ def get_lotto_data(membro, indice, lotto):
     if m == "enzo":
         if titolo == "ENI": return "1/8/2025"
         if titolo == "LEONARDO": return "7/8/2025"
-        if titolo == "FERRAGAMO": return "15/5/2026"
     elif m == "stefania":
         if indice == 1: return "10/7/2026"
         return "1/8/2025"
@@ -195,7 +193,8 @@ if st.session_state["ruolo"] == "admin":
             prezzi_aggiornati = {}
             titoli_aggiornati = []
             
-            titoli_da_aggiornare = set(dati["prezzi_attuali"].keys())
+            # ORA SCARICA SOLO I TITOLI EFFETTIVAMENTE PRESENTI NEI PORTAFOGLI
+            titoli_da_aggiornare = set()
             for m_lotti in dati["portafoglio"].values():
                 for l in m_lotti:
                     if "titolo" in l:
@@ -418,7 +417,6 @@ for i, membro in enumerate(membri_da_mostrare):
         if st.session_state["ruolo"] == "admin" and membro in ["Enzo", "Stefania", "Claudia"]:
             data_oggi = datetime.date.today().strftime('%d/%m/%Y')
             
-            # Costruisco la lista testuale di tutti i lotti posseduti (anche lotti multipli)
             dettaglio_titoli = ""
             for lotto in lotti:
                 t = lotto["titolo"].capitalize().strip()
@@ -427,7 +425,6 @@ for i, membro in enumerate(membri_da_mostrare):
                 pa = dati["prezzi_attuali"].get(lotto["titolo"].upper().strip(), pc)
                 dettaglio_titoli += f"- {t} ({q} az.): Acquisto {format_ita(pc, 3)} euro, Attuale {format_ita(pa, 2)} euro\n"
             
-            # Nuovo formato del messaggio senza emoji e senza dividendi
             testo_report = (
                 f"Ciao {membro}, ecco il tuo report aggiornato al {data_oggi}:\n\n"
                 f"Dettaglio dei tuoi lotti:\n"
