@@ -187,13 +187,22 @@ st.sidebar.button("🚪 Esci (Logout)", on_click=esegui_logout)
 st.sidebar.divider()
 
 if st.session_state["ruolo"] == "admin":
+    # --- TASTO TEMPORANEO CAMBIO PASSWORD ---
+    if st.sidebar.button("🔑 Imposta psw Stefania in 'admin'"):
+        import bcrypt
+        salt = bcrypt.gensalt()
+        nuova_psw_hash = bcrypt.hashpw("admin".encode('utf-8'), salt).decode('utf-8')
+        db.db.collection("utenti").document("stefania").update({"password_hash": nuova_psw_hash})
+        st.sidebar.success("Password cambiata! Ora puoi cancellare questo tasto dal codice.")
+    st.sidebar.divider()
+    # ----------------------------------------
+    
     st.sidebar.subheader("🌐 Sincronizzazione Borsa")
     if st.sidebar.button("📥 Scarica Prezzi in Tempo Reale"):
         with st.spinner("⏳ Scaricamento prezzi..."):
             prezzi_aggiornati = {}
             titoli_aggiornati = []
             
-            # ORA SCARICA SOLO I TITOLI EFFETTIVAMENTE PRESENTI NEI PORTAFOGLI
             titoli_da_aggiornare = set()
             for m_lotti in dati["portafoglio"].values():
                 for l in m_lotti:
