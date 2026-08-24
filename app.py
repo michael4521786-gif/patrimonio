@@ -68,7 +68,7 @@ def esegui_login():
         st.error("🚫 Accesso temporaneamente bloccato per troppi tentativi falliti. Ricarica la pagina.")
         return
 
-    user_input = st.session_state.user_input.lower()
+    user_input = st.session_state.user_input.lower().strip()
     psw_input = st.session_state.psw_input
     
     successo, dati_utente = db.verifica_credenziali(user_input, psw_input)
@@ -84,7 +84,11 @@ def esegui_login():
         if rimanenti == 0:
             st.error("🚫 Troppi tentativi falliti. Accesso bloccato.")
         else:
-            st.error(f"Credenziali errate. Tentativi rimanenti: {rimanenti}")
+            # --- MODIFICA MESSAGGIO ERRORE PER STEFANIA ---
+            if user_input == "stefania":
+                st.error("L'account Stefania è stato disabilitato")
+            else:
+                st.error(f"Credenziali errate. Tentativi rimanenti: {rimanenti}")
 
 def esegui_logout():
     st.session_state["utente"] = None
