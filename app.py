@@ -41,8 +41,7 @@ th {
 """, unsafe_allow_html=True)
 
 # --- MAPPE UTILI E CONFIGURAZIONE FISCALE ---
-# Rimosso "Stefania" dall'ordine per nasconderla dai menu e dalle schede
-ORDINE_FAMIGLIA = ["Enzo", "Mamma", "Claudia"]
+ORDINE_FAMIGLIA = ["Enzo", "Stefania", "Mamma", "Claudia"]
 ID_UTENTI = {"Enzo": "enzo", "Stefania": "stefania", "Mamma": "mamma", "Claudia": "claudia"}
 LOGHI_AZIENDE = {
     "ENI": "https://www.google.com/s2/favicons?domain=eni.com&sz=128#.png",
@@ -85,10 +84,7 @@ def esegui_login():
         if rimanenti == 0:
             st.error("🚫 Troppi tentativi falliti. Accesso bloccato.")
         else:
-            if user_input == "stefania":
-                st.error("L'account Stefania è stato disabilitato")
-            else:
-                st.error(f"Credenziali errate. Tentativi rimanenti: {rimanenti}")
+            st.error(f"Credenziali errate. Tentativi rimanenti: {rimanenti}")
 
 def esegui_logout():
     st.session_state["utente"] = None
@@ -338,7 +334,7 @@ if st.session_state["ruolo"] == "admin":
     membri_da_mostrare = [m for m in ORDINE_FAMIGLIA if m in dati["portafoglio"]]
     tabs = st.tabs(membri_da_mostrare)
 else:
-    if st.session_state["utente"] in ["claudia"]:
+    if st.session_state["utente"] in ["stefania", "claudia"]:
         st.markdown("### I Tuoi Titoli <span style='font-size: 16px; font-weight: 400; color: gray;'>[Nota: l'investimento iniziale è già al netto della Tobin Tax dello 0,20%]</span>", unsafe_allow_html=True)
     else:
         st.subheader("I Tuoi Titoli")
@@ -418,8 +414,8 @@ for i, membro in enumerate(membri_da_mostrare):
         styled_df = df.style.map(colora_valori, subset=['Plus/Minus Netta (€)'])
         st.dataframe(styled_df, use_container_width=True, hide_index=True, column_config={"Logo": st.column_config.ImageColumn("Logo", width="small")})
 
-        # --- PULSANTE WHATSAPP PER ENZO E CLAUDIA ---
-        if st.session_state["ruolo"] == "admin" and membro in ["Enzo", "Claudia"]:
+        # --- PULSANTE WHATSAPP PER ENZO, STEFANIA E CLAUDIA ---
+        if st.session_state["ruolo"] == "admin" and membro in ["Enzo", "Stefania", "Claudia"]:
             data_oggi = datetime.date.today().strftime('%d/%m/%Y')
             
             dettaglio_titoli = ""
